@@ -52,6 +52,49 @@ def parse_summary(log_text):
     return summary
 
 
+def infer_family(description):
+    desc = description.lower()
+    if any(token in desc for token in (
+        "grouped block-affine",
+        "group-mixed affine",
+        "split affine",
+        "translation reweighting",
+        "translated branch reweighting",
+    )):
+        return "restricted_affine_history"
+    if any(token in desc for token in ("lecun-scaled", "affine init", "identity-centered")):
+        return "affine_init"
+    if any(token in desc for token in (
+        "exact exponential",
+        "affine coupling",
+        "channel-wise",
+        "group-wise aeg",
+        "low-rank affine lift",
+        "full-matrix",
+        "full matrix",
+        "double aeg",
+    )):
+        return "heavy_high_dim_lift"
+    if any(token in desc for token in (
+        "value embeddings",
+        "window pattern",
+        "short windows",
+        "5 layers",
+        "ssl",
+        "sl",
+    )):
+        return "backbone"
+    if any(token in desc for token in (
+        "warmdown",
+        "weight decay",
+        "final lr",
+        "learning rate",
+        "batch",
+    )):
+        return "optimization"
+    return "misc"
+
+
 def read_results():
     if not RESULTS_TSV.exists():
         return []
@@ -378,10 +421,10 @@ def lecun_affine_class(with_reweight=False):
     trans_body = (
         "        base_trans = bfactor * trans_state * torch.sigmoid(linear_state)\n"
         "        trans = base_trans * (1 + trans_carry * torch.tanh(log_phi))\n"
-        "        # Restricted Aff(V): LeCun-scaled near-identity affine init with residual translation carry.\n"
+        "        # Restricted Aff(V): identity-centered LeCun init with residual translation carry.\n"
         if with_reweight else
         "        trans = bfactor * trans_state * torch.sigmoid(linear_state)\n"
-        "        # Restricted Aff(V): LeCun-scaled near-identity affine init.\n"
+        "        # Restricted Aff(V): identity-centered LeCun init for affine generators.\n"
     )
     return f"""class OptAEGV3(nn.Module):
     def __init__(self, width, groups=8):
@@ -429,10 +472,6 @@ def lecun_affine_class(with_reweight=False):
 
 def experiment_all_layer_ve(text):
     return set_has_ve(text, "return True")
-
-
-def experiment_window_sl(text):
-    return set_window_pattern(text, "SL")
 
 
 def experiment_window_ssl(text):
@@ -493,20 +532,10 @@ EXPERIMENTS = [
         description="value embeddings in every layer without GQA",
         commit_message="Enable value embeddings in every layer",
         family="backbone",
-        priority=30,
+        priority=25,
         cost="low",
         rationale="Strengthen the backbone before affine-history experiments.",
         apply=experiment_all_layer_ve,
-    ),
-    Experiment(
-        key="window_sl",
-        description="mixed local-global window pattern SL",
-        commit_message="Use mixed local-global window pattern SL",
-        family="backbone",
-        priority=25,
-        cost="low",
-        rationale="Cheap backbone sweep over local-global attention structure.",
-        apply=experiment_window_sl,
     ),
     Experiment(
         key="window_ssl",
@@ -515,7 +544,7 @@ EXPERIMENTS = [
         family="backbone",
         priority=35,
         cost="low",
-        rationale="Best-performing attention backbone so far.",
+        rationale="Best-performing attention backbone before the grouped affine lift.",
         apply=experiment_window_ssl,
     ),
     Experiment(
@@ -529,13 +558,43 @@ EXPERIMENTS = [
         apply=experiment_grouped_block_affine,
     ),
     Experiment(
+        key="aacs_reweight",
+        description="AACS-style translated branch reweighting",
+        commit_message="Add translated-branch reweighting to grouped affine step",
+        family="restricted_affine_history",
+        priority=88,
+        cost="low",
+        rationale="Implements the note's e^Lambda dA idea while staying in the stable commuting sector.",
+        apply=experiment_aacs_reweight,
+    ),
+    Experiment(
+        key="lecun_affine_init",
+        description="identity-centered LeCun init for grouped affine factors",
+        commit_message="Use identity-centered LeCun init for grouped affine factors",
+        family="affine_init",
+        priority=84,
+        cost="low",
+        rationale="Treats affine init as a first-class axis: fan-in aware but still near identity.",
+        apply=experiment_lecun_affine_init,
+    ),
+    Experiment(
+        key="aacs_reweight_lecun",
+        description="AACS-style reweighting with identity-centered LeCun init",
+        commit_message="Combine translation reweighting with identity-centered LeCun init",
+        family="restricted_affine_history",
+        priority=82,
+        cost="low",
+        rationale="Tests whether the note-aligned branch needs a better variance-preserving init to win.",
+        apply=experiment_aacs_reweight_lecun,
+    ),
+    Experiment(
         key="group_mixed_affine",
         description="group-mixed affine history step",
         commit_message="Add group-mixed affine history step",
         family="restricted_affine_history",
-        priority=20,
+        priority=30,
         cost="medium",
-        rationale="Allow group-space coupling while keeping channel-space M commuting.",
+        rationale="Allows tiny cross-group coupling while keeping channel-space M commuting.",
         apply=experiment_group_mixed_affine,
     ),
     Experiment(
@@ -543,49 +602,19 @@ EXPERIMENTS = [
         description="split affine translation and linear statistics",
         commit_message="Split affine translation and linear statistics",
         family="restricted_affine_history",
-        priority=15,
+        priority=25,
         cost="low",
         rationale="Separates translation and linear summaries, but was weaker in practice.",
         apply=experiment_split_stats_affine,
-    ),
-    Experiment(
-        key="aacs_reweight",
-        description="residual translation reweighting on grouped block-affine backbone",
-        commit_message="Add residual translation reweighting",
-        family="restricted_affine_history",
-        priority=85,
-        cost="low",
-        rationale="Implements the note's e^Lambda dA idea without leaving the stable commuting sector.",
-        apply=experiment_aacs_reweight,
-    ),
-    Experiment(
-        key="lecun_affine_init",
-        description="LeCun-scaled near-identity affine init on grouped block-affine backbone",
-        commit_message="Use LeCun-scaled affine init",
-        family="affine_init",
-        priority=80,
-        cost="low",
-        rationale="Treat affine branch init as its own axis: fan-in aware but still near identity.",
-        apply=experiment_lecun_affine_init,
-    ),
-    Experiment(
-        key="aacs_reweight_lecun",
-        description="residual translation reweighting with LeCun-scaled affine init",
-        commit_message="Combine translation reweighting with LeCun-scaled affine init",
-        family="restricted_affine_history",
-        priority=78,
-        cost="low",
-        rationale="Tests whether the note-aligned branch needs a better variance-preserving initialization.",
-        apply=experiment_aacs_reweight_lecun,
     ),
     Experiment(
         key="shorter_warmdown",
         description="shorter LR warmdown ratio 0.35",
         commit_message="Shorten LR warmdown ratio",
         family="optimization",
-        priority=35,
+        priority=40,
         cost="low",
-        rationale="Cheap optimizer-side check once the affine-history direction is fixed.",
+        rationale="Cheap optimizer-side follow-up once the affine-history direction is fixed.",
         apply=experiment_shorter_warmdown,
     ),
     Experiment(
@@ -593,7 +622,7 @@ EXPERIMENTS = [
         description="nonzero final LR fraction 0.1",
         commit_message="Keep nonzero final LR fraction",
         family="optimization",
-        priority=34,
+        priority=38,
         cost="low",
         rationale="Keeps late-stage updates alive after the best backbone stabilizes.",
         apply=experiment_nonzero_final_lr,
@@ -603,7 +632,7 @@ EXPERIMENTS = [
         description="lighter Muon weight decay 0.1",
         commit_message="Lower Muon weight decay",
         family="optimization",
-        priority=32,
+        priority=36,
         cost="low",
         rationale="Reduces regularization pressure once structured affine history starts helping.",
         apply=experiment_lower_weight_decay,
@@ -611,51 +640,10 @@ EXPERIMENTS = [
 ]
 
 
-def infer_family(description):
-    desc = description.lower()
-    if any(token in desc for token in (
-        "grouped block-affine",
-        "group-mixed affine",
-        "split affine",
-        "translation reweighting",
-        "shared-basis",
-    )):
-        return "restricted_affine_history"
-    if "lecun-scaled" in desc or "affine init" in desc:
-        return "affine_init"
-    if any(token in desc for token in ("exact exponential", "affine coupling")):
-        return "exact_affine_ordering"
-    if any(token in desc for token in (
-        "channel-wise",
-        "group-wise aeg",
-        "low-rank affine lift",
-        "full-matrix",
-        "full matrix",
-    )):
-        return "heavy_high_dim_lift"
-    if any(token in desc for token in (
-        "value embeddings",
-        "window pattern",
-        "short windows",
-        "5 layers",
-    )):
-        return "backbone"
-    if any(token in desc for token in (
-        "warmdown",
-        "weight decay",
-        "final lr",
-        "learning rate",
-        "batch",
-    )):
-        return "optimization"
-    return "misc"
-
-
 def compute_family_stats(rows):
     stats = {}
     for row in rows:
-        family = row["family"]
-        family_stats = stats.setdefault(family, {
+        family_stats = stats.setdefault(row["family"], {
             "keep": 0,
             "discard": 0,
             "crash": 0,
@@ -678,23 +666,29 @@ def score_experiment(experiment, family_stats, best_row):
     score -= 15 * stats.get("crash", 0)
     if experiment.cost == "low":
         score += 5
-    if "grouped block-affine" in best_row["description"].lower():
+
+    best_desc = best_row["description"].lower()
+    if "grouped block-affine" in best_desc:
         if experiment.family in {"restricted_affine_history", "affine_init"}:
-            score += 15
+            score += 20
         if experiment.family == "optimization":
-            score += 4
-    if experiment.family == "exact_affine_ordering":
-        score -= 25
+            score += 6
+        if experiment.family == "backbone":
+            score -= 20
+    elif "ssl" in best_desc or "value embeddings" in best_desc:
+        if experiment.family == "backbone":
+            score += 15
+
     if experiment.family == "heavy_high_dim_lift":
         score -= 40
     return score
 
 
-def rank_experiments(rows, experiments, best_row):
+def rank_experiments(rows, best_row):
     tried = {row["description"] for row in rows}
     family_stats = compute_family_stats(rows)
     ranked = []
-    for experiment in experiments:
+    for experiment in EXPERIMENTS:
         if experiment.description in tried:
             continue
         ranked.append((score_experiment(experiment, family_stats, best_row), experiment))
@@ -715,6 +709,7 @@ def write_state(best_row, family_stats, ranked):
                 "description": experiment.description,
                 "family": experiment.family,
                 "cost": experiment.cost,
+                "rationale": experiment.rationale,
             }
             for score, experiment in ranked[:5]
         ],
@@ -738,19 +733,20 @@ def write_recommendations(best_row, family_stats, ranked):
             f"- `{family}`: keep={stats['keep']} discard={stats['discard']} crash={stats['crash']} best={best_text}"
         )
     lines.extend(["", "## Next Candidates"])
-    for idx, (score, experiment) in enumerate(ranked[:5], start=1):
-        lines.append(
-            f"{idx}. `{experiment.description}`"
-        )
-        lines.append(
-            f"   score={score:.1f}, family={experiment.family}, cost={experiment.cost}. {experiment.rationale}"
-        )
+    if ranked:
+        for index, (score, experiment) in enumerate(ranked[:5], start=1):
+            lines.append(f"{index}. `{experiment.description}`")
+            lines.append(
+                f"   score={score:.1f}, family={experiment.family}, cost={experiment.cost}. {experiment.rationale}"
+            )
+    else:
+        lines.append("No eligible experiments remain.")
     RECOMMENDATIONS_MD.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def refresh_planning_artifacts(rows, experiments):
+def refresh_planning_artifacts(rows):
     best_row = current_best(rows)
-    ranked, family_stats = rank_experiments(rows, experiments, best_row)
+    ranked, family_stats = rank_experiments(rows, best_row)
     write_state(best_row, family_stats, ranked)
     write_recommendations(best_row, family_stats, ranked)
     return best_row, ranked
@@ -775,41 +771,52 @@ def revert_head():
     subprocess.run(["git", "revert", "--no-edit", "HEAD"], cwd=ROOT, check=True)
 
 
-def apply_and_commit(experiment):
-    original_text = TRAIN_PY.read_text(encoding="utf-8")
-    updated_text = experiment.apply(original_text)
-    if updated_text == original_text:
-        raise RuntimeError(f"No-op experiment: {experiment.description}")
-    try:
-        TRAIN_PY.write_text(updated_text, encoding="utf-8")
-        subprocess.run([sys.executable, "-m", "py_compile", "train.py"], cwd=ROOT, check=True)
-        subprocess.run(["git", "add", "train.py"], cwd=ROOT, check=True)
-        subprocess.run(["git", "commit", "-m", experiment.commit_message], cwd=ROOT, check=True)
-    except Exception:
-        TRAIN_PY.write_text(original_text, encoding="utf-8")
-        raise
-
-
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--suggest", action="store_true", help="Only refresh recommendations and exit.")
-    parser.add_argument("--limit", type=int, default=None, help="Maximum number of experiments to run.")
+    parser.add_argument("--suggest", action="store_true", help="Only refresh and print ranked recommendations.")
+    parser.add_argument("--max-experiments", type=int, default=None, help="Maximum experiments to run in this invocation.")
     args = parser.parse_args()
 
-    acquire_lock()
     rows = read_results()
-    best_row, ranked = refresh_planning_artifacts(rows, EXPERIMENTS)
+    best_row, ranked = refresh_planning_artifacts(rows)
     if args.suggest:
         print(RECOMMENDATIONS_MD.read_text(encoding="utf-8"), end="")
         return
 
-    runs_left = args.limit
-    while ranked and (runs_left is None or runs_left > 0):
-        score, experiment = ranked[0]
-        ensure_train_clean()
-        print(f"Running experiment: {experiment.description} (score={score:.1f})", flush=True)
-        apply_and_commit(experiment)
+    acquire_lock()
+    runs_completed = 0
 
+    while True:
+        rows = read_results()
+        best_row, ranked = refresh_planning_artifacts(rows)
+        if not ranked:
+            print("No eligible experiments remain.", flush=True)
+            break
+        if args.max_experiments is not None and runs_completed >= args.max_experiments:
+            print(f"Reached max_experiments={args.max_experiments}.", flush=True)
+            break
+
+        score, experiment = ranked[0]
+        print(
+            f"Selected [{experiment.family}] score={score:.1f}: {experiment.description}",
+            flush=True,
+        )
+
+        ensure_train_clean()
+        original_text = TRAIN_PY.read_text(encoding="utf-8")
+        updated_text = experiment.apply(original_text)
+        if updated_text == original_text:
+            print(f"No-op experiment, skipping: {experiment.description}", flush=True)
+            append_result(git_output("rev-parse", "--short", "HEAD"), 0.0, 0.0, "crash", experiment.description)
+            runs_completed += 1
+            continue
+
+        TRAIN_PY.write_text(updated_text, encoding="utf-8")
+        subprocess.run([sys.executable, "-m", "py_compile", "train.py"], cwd=ROOT, check=True)
+        subprocess.run(["git", "add", "train.py"], cwd=ROOT, check=True)
+        subprocess.run(["git", "commit", "-m", experiment.commit_message], cwd=ROOT, check=True)
+
+        print(f"Running experiment: {experiment.description}", flush=True)
         status = "crash"
         val_bpb = 0.0
         memory_gb = 0.0
@@ -819,23 +826,20 @@ def main():
             memory_gb = summary.get("peak_vram_mb", 0.0) / 1024.0
             if val_bpb > 0:
                 status = "keep" if val_bpb < best_row["val_bpb"] else "discard"
-            else:
-                status = "crash"
+            if status == "crash":
+                print("Experiment did not produce a valid summary. See run.log.", flush=True)
         except subprocess.TimeoutExpired:
-            status = "crash"
+            print("Experiment timed out. See run.log.", flush=True)
 
         commit = git_output("rev-parse", "--short", "HEAD")
         append_result(commit, val_bpb, memory_gb, status, experiment.description)
+        runs_completed += 1
+
         if status == "keep":
             print(f"Kept {commit} with val_bpb={val_bpb:.6f}", flush=True)
         else:
             revert_head()
             print(f"Discarded {commit} with val_bpb={val_bpb:.6f}", flush=True)
-
-        rows = read_results()
-        best_row, ranked = refresh_planning_artifacts(rows, EXPERIMENTS)
-        if runs_left is not None:
-            runs_left -= 1
 
 
 if __name__ == "__main__":
