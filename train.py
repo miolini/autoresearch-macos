@@ -63,16 +63,24 @@ def apply_rotary_emb(x, cos, sin):
 
 
 class OptAEGV3(nn.Module):
-    def __init__(self):
+    def __init__(self, width, groups=8):
         super().__init__()
-        self.ux = nn.Parameter(torch.zeros(1, 1))
-        self.uy = nn.Parameter(torch.zeros(1, 1))
-        self.vx = nn.Parameter(torch.zeros(1, 1))
-        self.vy = nn.Parameter(torch.zeros(1, 1))
-        self.afactor = nn.Parameter(torch.empty(1, 1))
-        self.mfactor = nn.Parameter(torch.empty(1, 1))
+        assert width % groups == 0
+        shape = (1, 1, groups)
+        self.width = width
+        self.groups = groups
+        self.group_size = width // groups
+        self.ux = nn.Parameter(torch.zeros(shape))
+        self.uy = nn.Parameter(torch.zeros(shape))
+        self.vx = nn.Parameter(torch.zeros(shape))
+        self.vy = nn.Parameter(torch.zeros(shape))
+        self.afactor = nn.Parameter(torch.empty(shape))
+        self.mfactor = nn.Parameter(torch.empty(shape))
 
         self.reset_parameters()
+
+    def _expand(self, param):
+        return param.repeat_interleave(self.group_size, dim=-1)
 
     def reset_parameters(self):
         with torch.no_grad():
@@ -80,18 +88,24 @@ class OptAEGV3(nn.Module):
             self.uy.zero_()
             self.vx.zero_()
             self.vy.zero_()
-
-            # LeCun-style small perturbation for a scalar shared nonlinearity
             self.afactor.normal_(0.0, 0.05)
             self.mfactor.normal_(0.0, 0.05)
 
     def forward(self, data):
-        u = data * (1 + self.uy) + self.ux
-        v = data * (1 + self.vy) + self.vx
+        ux = self._expand(self.ux)
+        uy = self._expand(self.uy)
+        vx = self._expand(self.vx)
+        vy = self._expand(self.vy)
+        afactor = self._expand(self.afactor)
+        mfactor = self._expand(self.mfactor)
 
-        dx = self.afactor * u * torch.sigmoid(v)
-        dy = self.mfactor * data * torch.tanh(data)
+        u = data * (1 + uy) + ux
+        v = data * (1 + vy) + vx
+
+        dx = afactor * u * torch.sigmoid(v)
+        dy = mfactor * data * torch.tanh(data)
         return dx + dy
+
 
 
 class CausalSelfAttention(nn.Module):
@@ -168,7 +182,7 @@ class Block(nn.Module):
     def __init__(self, config, layer_idx):
         super().__init__()
         self.attn = CausalSelfAttention(config, layer_idx)
-        self.act = OptAEGV3()
+        self.act = OptAEGV3(config.n_embd)
 
     def forward(self, x, ve, cos_sin, window_size):
         x = x + self.attn(norm(x), ve, cos_sin, window_size)
