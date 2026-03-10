@@ -68,7 +68,7 @@ class OptAEGV3(nn.Module):
         assert width % groups == 0
         self.groups = groups
         self.group_size = width // groups
-        shape = (1, 1, groups, 1)
+        shape = (groups, 1)
         self.bx = nn.Parameter(torch.zeros(shape))
         self.by = nn.Parameter(torch.zeros(shape))
         self.mx = nn.Parameter(torch.zeros(shape))
@@ -90,12 +90,18 @@ class OptAEGV3(nn.Module):
     def forward(self, data):
         B, T, C = data.shape
         x = data.reshape(B, T, self.groups, self.group_size)
+        bx = self.bx.view(1, 1, self.groups, 1)
+        by = self.by.view(1, 1, self.groups, 1)
+        mx = self.mx.view(1, 1, self.groups, 1)
+        my = self.my.view(1, 1, self.groups, 1)
+        bfactor = self.bfactor.view(1, 1, self.groups, 1)
+        mfactor = self.mfactor.view(1, 1, self.groups, 1)
         group_state = x.mean(dim=-1, keepdim=True)
-        trans_state = group_state * (1 + self.by) + self.bx
-        linear_state = group_state * (1 + self.my) + self.mx
+        trans_state = group_state * (1 + by) + bx
+        linear_state = group_state * (1 + my) + mx
 
-        trans = self.bfactor * trans_state * torch.sigmoid(linear_state)
-        log_phi = self.mfactor * torch.tanh(linear_state)
+        trans = bfactor * trans_state * torch.sigmoid(linear_state)
+        log_phi = mfactor * torch.tanh(linear_state)
         # Restricted Aff(V): block-diagonal commuting linear history plus block translation.
         delta = x * torch.expm1(log_phi) + trans
         return delta.reshape(B, T, C)
