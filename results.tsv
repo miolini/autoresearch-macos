@@ -11,3 +11,4 @@ d844272	1.750274	0.0	discard	2x EMBEDDING_LR 0.6->1.2
 815735f	1.825159	0.0	discard	wider ASPECT_RATIO 64->80
 0e6c5e0	1.793629	0.0	discard	remove value embeddings
 c3bdac1	1.648321	0.0	keep	halve TOTAL_BATCH_SIZE 65K->32K (-5.7%)
+bab9d9e	1.532485	0.0	keep	quarter batch 32K->16K (-7.0%)
