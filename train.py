@@ -168,12 +168,15 @@ class Block(nn.Module):
     def __init__(self, config, layer_idx):
         super().__init__()
         self.attn = CausalSelfAttention(config, layer_idx)
-        self.act = OptAEGV3()
+        self.act1 = OptAEGV3()
+        self.act2 = OptAEGV3()
 
     def forward(self, x, ve, cos_sin, window_size):
         x = x + self.attn(norm(x), ve, cos_sin, window_size)
-        x = x + self.act(norm(x))
+        x = x + self.act1(norm(x))
+        x = x + self.act2(norm(x))
         return x
+
 
 
 class GPT(nn.Module):
