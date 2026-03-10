@@ -63,35 +63,42 @@ def apply_rotary_emb(x, cos, sin):
 
 
 class OptAEGV3(nn.Module):
-    def __init__(self):
+    def __init__(self, width, groups=8):
         super().__init__()
-        self.ux = nn.Parameter(torch.zeros(1, 1))
-        self.uy = nn.Parameter(torch.zeros(1, 1))
-        self.vx = nn.Parameter(torch.zeros(1, 1))
-        self.vy = nn.Parameter(torch.zeros(1, 1))
-        self.afactor = nn.Parameter(torch.empty(1, 1))
-        self.mfactor = nn.Parameter(torch.empty(1, 1))
+        assert width % groups == 0
+        self.groups = groups
+        self.group_size = width // groups
+        shape = (1, 1, groups, 1)
+        self.bx = nn.Parameter(torch.zeros(shape))
+        self.by = nn.Parameter(torch.zeros(shape))
+        self.mx = nn.Parameter(torch.zeros(shape))
+        self.my = nn.Parameter(torch.zeros(shape))
+        self.bfactor = nn.Parameter(torch.empty(shape))
+        self.mfactor = nn.Parameter(torch.empty(shape))
 
         self.reset_parameters()
 
     def reset_parameters(self):
         with torch.no_grad():
-            self.ux.zero_()
-            self.uy.zero_()
-            self.vx.zero_()
-            self.vy.zero_()
-
-            # LeCun-style small perturbation for a scalar shared nonlinearity
-            self.afactor.normal_(0.0, 0.05)
+            self.bx.zero_()
+            self.by.zero_()
+            self.mx.zero_()
+            self.my.zero_()
+            self.bfactor.normal_(0.0, 0.05)
             self.mfactor.normal_(0.0, 0.05)
 
     def forward(self, data):
-        u = data * (1 + self.uy) + self.ux
-        v = data * (1 + self.vy) + self.vx
+        B, T, C = data.shape
+        x = data.reshape(B, T, self.groups, self.group_size)
+        group_state = x.mean(dim=-1, keepdim=True)
+        trans_state = group_state * (1 + self.by) + self.bx
+        linear_state = group_state * (1 + self.my) + self.mx
 
-        dx = self.afactor * u * torch.sigmoid(v)
-        dy = self.mfactor * data * torch.tanh(data)
-        return dx + dy
+        trans = self.bfactor * trans_state * torch.sigmoid(linear_state)
+        log_phi = self.mfactor * torch.tanh(linear_state)
+        # Restricted Aff(V): block-diagonal commuting linear history plus block translation.
+        delta = x * torch.expm1(log_phi) + trans
+        return delta.reshape(B, T, C)
 
 
 class CausalSelfAttention(nn.Module):
@@ -168,7 +175,7 @@ class Block(nn.Module):
     def __init__(self, config, layer_idx):
         super().__init__()
         self.attn = CausalSelfAttention(config, layer_idx)
-        self.act = OptAEGV3()
+        self.act = OptAEGV3(config.n_embd)
 
     def forward(self, x, ve, cos_sin, window_size):
         x = x + self.attn(norm(x), ve, cos_sin, window_size)
