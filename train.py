@@ -62,6 +62,44 @@ def apply_rotary_emb(x, cos, sin):
     return torch.cat([y1, y2], 3)
 
 
+class OptAEGV3(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.ux = nn.Parameter(torch.zeros(1, 1))
+        self.uy = nn.Parameter(torch.zeros(1, 1))
+        self.vx = nn.Parameter(torch.zeros(1, 1))
+        self.vy = nn.Parameter(torch.zeros(1, 1))
+        self.afactor = nn.Parameter(torch.empty(1, 1))
+        self.mfactor = nn.Parameter(torch.empty(1, 1))
+
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        with torch.no_grad():
+            self.ux.zero_()
+            self.uy.zero_()
+            self.vx.zero_()
+            self.vy.zero_()
+
+            # LeCun-style small perturbation for a scalar shared nonlinearity
+            self.afactor.normal_(0.0, 0.05)
+            self.mfactor.normal_(0.0, 0.05)
+
+    def forward(self, data):
+        shape = data.size()
+        data = data.flatten(1)
+        data = (data - data.mean()) / (data.std() + 1e-6)
+
+        u = data * (1 + self.uy) + self.ux
+        v = data * (1 + self.vy) + self.vx
+
+        dx = self.afactor * u * torch.sigmoid(v)
+        dy = self.mfactor * torch.tanh(data)
+        data = data * (1 + dy) + dx
+
+        return data.view(*shape)
+
+
 class CausalSelfAttention(nn.Module):
     def __init__(self, config, layer_idx):
         super().__init__()
@@ -136,11 +174,11 @@ class Block(nn.Module):
     def __init__(self, config, layer_idx):
         super().__init__()
         self.attn = CausalSelfAttention(config, layer_idx)
-        self.mlp = MLP(config)
+        self.act = OptAEGV3()
 
     def forward(self, x, ve, cos_sin, window_size):
         x = x + self.attn(norm(x), ve, cos_sin, window_size)
-        x = x + self.mlp(norm(x))
+        x = self.act(norm(x))
         return x
 
 
@@ -182,8 +220,6 @@ class GPT(nn.Module):
             torch.nn.init.uniform_(block.attn.c_k.weight, -s, s)
             torch.nn.init.uniform_(block.attn.c_v.weight, -s, s)
             torch.nn.init.zeros_(block.attn.c_proj.weight)
-            torch.nn.init.uniform_(block.mlp.c_fc.weight, -s, s)
-            torch.nn.init.zeros_(block.mlp.c_proj.weight)
         # Per-layer scalars
         self.resid_lambdas.fill_(1.0)
         self.x0_lambdas.fill_(0.1)
