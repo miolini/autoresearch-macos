@@ -90,7 +90,8 @@ class OptAEGV3(nn.Module):
         v = data * (1 + self.vy) + self.vx
 
         dx = self.afactor * u * torch.sigmoid(v)
-        dy = self.mfactor * data * torch.tanh(data)
+        log_phi = self.mfactor * torch.tanh(v)
+        dy = data * torch.expm1(log_phi)
         return dx + dy
 
 
