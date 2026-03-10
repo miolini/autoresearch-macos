@@ -69,8 +69,6 @@ class OptAEGV3(nn.Module):
         self.groups = groups
         self.group_size = width // groups
         shape = (groups, 1)
-        self.trans_mix = nn.Linear(groups, groups, bias=False)
-        self.linear_mix = nn.Linear(groups, groups, bias=False)
         self.bx = nn.Parameter(torch.zeros(shape))
         self.by = nn.Parameter(torch.zeros(shape))
         self.mx = nn.Parameter(torch.zeros(shape))
@@ -82,8 +80,6 @@ class OptAEGV3(nn.Module):
 
     def reset_parameters(self):
         with torch.no_grad():
-            self.trans_mix.weight.zero_()
-            self.linear_mix.weight.zero_()
             self.bx.zero_()
             self.by.zero_()
             self.mx.zero_()
@@ -94,21 +90,19 @@ class OptAEGV3(nn.Module):
     def forward(self, data):
         B, T, C = data.shape
         x = data.reshape(B, T, self.groups, self.group_size)
-        group_state = x.mean(dim=-1)
-        mixed_trans_state = group_state + self.trans_mix(group_state)
-        mixed_linear_state = group_state + self.linear_mix(group_state)
         bx = self.bx.view(1, 1, self.groups, 1)
         by = self.by.view(1, 1, self.groups, 1)
         mx = self.mx.view(1, 1, self.groups, 1)
         my = self.my.view(1, 1, self.groups, 1)
         bfactor = self.bfactor.view(1, 1, self.groups, 1)
         mfactor = self.mfactor.view(1, 1, self.groups, 1)
-        trans_state = mixed_trans_state.unsqueeze(-1) * (1 + by) + bx
-        linear_state = mixed_linear_state.unsqueeze(-1) * (1 + my) + mx
+        group_state = x.mean(dim=-1, keepdim=True)
+        trans_state = group_state * (1 + by) + bx
+        linear_state = group_state * (1 + my) + mx
 
         trans = bfactor * trans_state * torch.sigmoid(linear_state)
         log_phi = mfactor * torch.tanh(linear_state)
-        # Restricted Aff(V): commuting block-diagonal M with lightweight group-space history mixing.
+        # Restricted Aff(V): block-diagonal commuting linear history plus block translation.
         delta = x * torch.expm1(log_phi) + trans
         return delta.reshape(B, T, C)
 
