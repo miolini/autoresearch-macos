@@ -512,7 +512,7 @@ class MuonAdamW(torch.optim.Optimizer):
 # Model architecture
 ASPECT_RATIO = 64       # model_dim = depth * ASPECT_RATIO
 HEAD_DIM = 128          # target head dimension for attention
-WINDOW_PATTERN = "SSL"  # sliding-window schedule
+WINDOW_PATTERN = "SSSL"  # sliding-window schedule
 
 # Optimization
 TOTAL_BATCH_SIZE = 2**16 # ~65K tokens per optimizer step
