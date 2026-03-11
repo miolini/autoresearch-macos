@@ -17,6 +17,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from utils.checkpoint import save_checkpoint
+
 def verify_macos_env():
     if sys.platform != "darwin":
         raise RuntimeError(f"This script requires macOS with Metal. Detected platform: {sys.platform}")
@@ -608,23 +610,6 @@ _last_checkpoint_time = 0.0  # Track last checkpoint save time
 checkpoint_dir = os.path.join(os.getcwd(), "checkpoints")
 
 
-def save_checkpoint(model, optimizer, step, total_training_time, config, filename, val_bpb=None):
-    """Save model checkpoint to disk."""
-    os.makedirs(checkpoint_dir, exist_ok=True)
-    checkpoint_path = os.path.join(checkpoint_dir, filename)
-    data = {
-        'model_state_dict': model.state_dict(),
-        'optimizer_state_dict': optimizer.state_dict(),
-        'step': step,
-        'total_training_time': total_training_time,
-        'config': asdict(config),
-    }
-    if val_bpb is not None:
-        data['val_bpb'] = val_bpb
-    torch.save(data, checkpoint_path)
-    return checkpoint_path
-
-
 def sync_device(device_type):
     if device_type == "cuda":
         torch.cuda.synchronize()
@@ -698,7 +683,7 @@ while True:
     checkpoint_interval = 3600  # 1 hour in seconds
     if total_training_time - _last_checkpoint_time >= checkpoint_interval:
         checkpoint_file = save_checkpoint(
-            model, optimizer, step, total_training_time, config,
+            model, optimizer, step, total_training_time, asdict(config), checkpoint_dir,
             f"checkpoint_{int(total_training_time)}.pt"
         )
         print(f"\nHourly checkpoint saved: {checkpoint_file}")
@@ -715,7 +700,7 @@ with autocast_ctx:
 
 # Save final checkpoint for testing
 final_checkpoint = save_checkpoint(
-    model, optimizer, step, total_training_time, config,
+    model, optimizer, step, total_training_time, asdict(config), checkpoint_dir,
     "latest.pt", val_bpb=val_bpb
 )
 print(f"Final checkpoint saved: {final_checkpoint}")
