@@ -1,4 +1,8 @@
 commit	val_bpb	memory_gb	status	description
 814dc55	1.408009	0.0	keep	baseline
 4d1c289	1.397839	0.0	keep	reduce warmdown ratio from 0.5 to 0.3
-44506e6	1.399433	0.0	discard	restore warmdown 0.3, test checkpoint saving
+ce08f80	1.377765	0.0	keep	halve batch size for more steps (411 vs 212)
+e58742b	1.374488	0.0	keep	increase scalar_lr from 0.5 to 0.8
+d3ffc12	1.372874	0.0	keep	reduce initial Muon momentum from 0.85 to 0.80
+ab809cc	1.370751	0.0	keep	set final LR fraction to 0.1 for higher end LR
+f16e4ee	1.370347	0.0	keep	set final LR fraction to 0.15 (BEST)
