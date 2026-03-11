@@ -485,10 +485,10 @@ HEAD_DIM = 128          # target head dimension for attention
 WINDOW_PATTERN = "L"    # sliding window pattern: L=full, S=half context
 
 # Optimization
-TOTAL_BATCH_SIZE = 2**15 # ~32K tokens per optimizer step
+TOTAL_BATCH_SIZE = 2**14 # ~16K tokens per optimizer step
 EMBEDDING_LR = 0.6      # learning rate for token embeddings (Adam)
-UNEMBEDDING_LR = 0.004  # learning rate for lm_head (Adam)
-MATRIX_LR = 0.04        # learning rate for matrix parameters (Muon)
+UNEMBEDDING_LR = 0.003  # learning rate for lm_head (Adam)
+MATRIX_LR = 0.025        # learning rate for matrix parameters (Muon)
 SCALAR_LR = 0.8         # learning rate for per-layer scalars (Adam)
 WEIGHT_DECAY = 0.2      # cautious weight decay for Muon
 ADAM_BETAS = (0.8, 0.95) # Adam beta1, beta2
@@ -498,7 +498,7 @@ FINAL_LR_FRAC = 0.15     # final LR as fraction of initial
 
 # Model size
 DEPTH = 4               # number of transformer layers
-DEVICE_BATCH_SIZE = 16  # per-device batch size (reduce if OOM)
+DEVICE_BATCH_SIZE = 8  # per-device batch size (reduce if OOM)
 
 # ---------------------------------------------------------------------------
 # Setup: tokenizer, model, optimizer, dataloader
@@ -590,8 +590,8 @@ def get_lr_multiplier(progress):
         return cooldown * 1.0 + (1 - cooldown) * FINAL_LR_FRAC
 
 def get_muon_momentum(step):
-    frac = min(step / 300, 1)
-    return (1 - frac) * 0.80 + frac * 0.95
+    frac = min(step / 200, 1)
+    return (1 - frac) * 0.80 + frac * 0.93
 
 def get_weight_decay(progress):
     return WEIGHT_DECAY * (1 - progress)
