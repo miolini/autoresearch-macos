@@ -18,3 +18,4 @@ ba16b77	1.535071	0.0	discard	warmdown 0.5->0.3
 f46bad9	1.627648	0.0	discard	add warmup 0.05
 0f96deb	1.542159	0.0	discard	DEVICE_BATCH=4 TOTAL=8K (too noisy)
 34658ab	1.461426	0.0	keep	DEPTH=4 with optimized HPs (11.5M 443 steps -4.6%)
+6dee92c	1.454289	0.0	keep	DEPTH=3 (10.7M 533 steps -0.5%)
