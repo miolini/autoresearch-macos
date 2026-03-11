@@ -861,3 +861,7 @@ print(f"total_tokens_M:   {total_tokens / 1e6:.1f}")
 print(f"num_steps:        {step}")
 print(f"num_params_M:     {num_params / 1e6:.1f}")
 print(f"depth:            {DEPTH}")
+
+ckpt_path = "checkpoint.pt"
+torch.save({"config": asdict(config), "model": model.state_dict()}, ckpt_path)
+print(f"checkpoint:       {ckpt_path}")
