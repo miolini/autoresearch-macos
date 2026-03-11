@@ -1,33 +1,275 @@
 """
 TUI Chat interface for testing the trained model.
 Usage: uv run chat.py [--checkpoint PATH]
+
+This script loads the model and tokenizer, then provides a simple chat interface.
 """
 
 import os
 import sys
 import argparse
-import torch
+import pickle
 
 # Verify macOS environment
 def verify_macos_env():
     if sys.platform != "darwin":
         raise RuntimeError(f"This script requires macOS with Metal. Detected platform: {sys.platform}")
+    import torch
     if not torch.backends.mps.is_available():
         raise RuntimeError("MPS (Metal Performance Shaders) is not available. Ensure you are running on Apple Silicon.")
     print("Environment verified: macOS with MPS available.")
 
 verify_macos_env()
 
-from prepare import Tokenizer, MAX_SEQ_LEN
-from train import GPT, build_model_config
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from dataclasses import dataclass, asdict
 
 
-def load_checkpoint(checkpoint_path, device):
-    """Load model and optimizer state from checkpoint."""
-    print(f"Loading checkpoint: {checkpoint_path}")
-    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
-    return checkpoint
+# ---------------------------------------------------------------------------
+# Model classes (copied from train.py to avoid importing training code)
+# ---------------------------------------------------------------------------
 
+CACHE_DIR = os.path.join(os.path.expanduser("~"), ".cache", "autoresearch")
+TOKENIZER_DIR = os.path.join(CACHE_DIR, "tokenizer")
+
+@dataclass
+class GPTConfig:
+    sequence_len: int = 2048
+    vocab_size: int = 32768
+    n_layer: int = 12
+    n_head: int = 6
+    n_kv_head: int = 6
+    n_embd: int = 768
+    window_pattern: str = "SSSL"
+
+
+def norm(x):
+    return F.rms_norm(x, (x.size(-1),))
+
+
+def has_ve(layer_idx, n_layer):
+    """Returns True if layer should have Value Embedding (alternating, last always included)."""
+    return layer_idx % 2 == (n_layer - 1) % 2
+
+
+def apply_rotary_emb(x, cos, sin):
+    assert x.ndim == 4
+    d = x.shape[3] // 2
+    x1, x2 = x[..., :d], x[..., d:]
+    y1 = x1 * cos + x2 * sin
+    y2 = x1 * (-sin) + x2 * cos
+    return torch.cat([y1, y2], 3)
+
+
+class CausalSelfAttention(nn.Module):
+    def __init__(self, config, layer_idx):
+        super().__init__()
+        self.n_head = config.n_head
+        self.n_kv_head = config.n_kv_head
+        self.n_embd = config.n_embd
+        self.head_dim = self.n_embd // self.n_head
+        assert self.n_embd % self.n_head == 0
+        assert self.n_kv_head <= self.n_head and self.n_head % self.n_kv_head == 0
+        self.c_q = nn.Linear(self.n_embd, self.n_head * self.head_dim, bias=False)
+        self.c_k = nn.Linear(self.n_embd, self.n_kv_head * self.head_dim, bias=False)
+        self.c_v = nn.Linear(self.n_embd, self.n_kv_head * self.head_dim, bias=False)
+        self.c_proj = nn.Linear(self.n_embd, self.n_embd, bias=False)
+        self.ve_gate_channels = 32
+        self.ve_gate = nn.Linear(self.ve_gate_channels, self.n_kv_head, bias=False) if has_ve(layer_idx, config.n_layer) else None
+
+    def forward(self, x, ve, cos_sin, window_size):
+        B, T, C = x.size()
+        q = self.c_q(x).view(B, T, self.n_head, self.head_dim)
+        k = self.c_k(x).view(B, T, self.n_kv_head, self.head_dim)
+        v = self.c_v(x).view(B, T, self.n_kv_head, self.head_dim)
+
+        # Value residual
+        if ve is not None:
+            ve = ve.view(B, T, self.n_kv_head, self.head_dim)
+            gate = 2 * torch.sigmoid(self.ve_gate(x[..., :self.ve_gate_channels]))
+            v = v + gate.unsqueeze(-1) * ve
+
+        cos, sin = cos_sin
+        q, k = apply_rotary_emb(q, cos, sin), apply_rotary_emb(k, cos, sin)
+        q, k = norm(q), norm(k)
+
+        # Expand heads for KV based on GQA
+        k = k.repeat_interleave(self.n_head // self.n_kv_head, dim=2)
+        v = v.repeat_interleave(self.n_head // self.n_kv_head, dim=2)
+        
+        # Transpose to [B, H, T, D]
+        q = q.transpose(1, 2)
+        k = k.transpose(1, 2)
+        v = v.transpose(1, 2)
+        
+        # Apply mask for sliding window
+        window = window_size[0]
+        if window > 0 and window < T:
+            mask = torch.ones(T, T, dtype=torch.bool, device=q.device).tril()
+            mask = mask.triu(diagonal=1 - window)
+            y = F.scaled_dot_product_attention(q, k, v, attn_mask=mask)
+        else:
+            y = F.scaled_dot_product_attention(q, k, v, is_causal=True)
+            
+        y = y.transpose(1, 2).contiguous().view(B, T, -1)
+        y = self.c_proj(y)
+        return y
+
+
+class MLP(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.c_fc = nn.Linear(config.n_embd, 4 * config.n_embd, bias=False)
+        self.c_proj = nn.Linear(4 * config.n_embd, config.n_embd, bias=False)
+
+    def forward(self, x):
+        x = self.c_fc(x)
+        x = F.relu(x).square()
+        x = self.c_proj(x)
+        return x
+
+
+class Block(nn.Module):
+    def __init__(self, config, layer_idx):
+        super().__init__()
+        self.attn = CausalSelfAttention(config, layer_idx)
+        self.mlp = MLP(config)
+
+    def forward(self, x, ve, cos_sin, window_size):
+        x = x + self.attn(norm(x), ve, cos_sin, window_size)
+        x = x + self.mlp(norm(x))
+        return x
+
+
+class GPT(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.config = config
+        self.window_sizes = self._compute_window_sizes(config)
+        self.transformer = nn.ModuleDict({
+            "wte": nn.Embedding(config.vocab_size, config.n_embd),
+            "h": nn.ModuleList([Block(config, i) for i in range(config.n_layer)]),
+        })
+        self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
+        self.resid_lambdas = nn.Parameter(torch.ones(config.n_layer))
+        self.x0_lambdas = nn.Parameter(torch.zeros(config.n_layer))
+        # Value embeddings
+        head_dim = config.n_embd // config.n_head
+        kv_dim = config.n_kv_head * head_dim
+        self.value_embeds = nn.ModuleDict({
+            str(i): nn.Embedding(config.vocab_size, kv_dim)
+            for i in range(config.n_layer) if has_ve(i, config.n_layer)
+        })
+        # Rotary embeddings
+        self.rotary_seq_len = config.sequence_len * 10
+        cos, sin = self._precompute_rotary_embeddings(self.rotary_seq_len, head_dim)
+        self.register_buffer("cos", cos, persistent=False)
+        self.register_buffer("sin", sin, persistent=False)
+
+    @torch.no_grad()
+    def init_weights(self):
+        # Placeholder - not needed for inference
+        pass
+
+    @torch.no_grad()
+    def _precompute_rotary_embeddings(self, seq_len, head_dim, base=10000, device=None):
+        if device is None:
+            device = self.transformer.wte.weight.device
+        channel_range = torch.arange(0, head_dim, 2, dtype=torch.float32, device=device)
+        inv_freq = 1.0 / (base ** (channel_range / head_dim))
+        t = torch.arange(seq_len, dtype=torch.float32, device=device)
+        freqs = torch.outer(t, inv_freq)
+        cos, sin = freqs.cos(), freqs.sin()
+        cos, sin = cos.bfloat16(), sin.bfloat16()
+        cos, sin = cos[None, :, None, :], sin[None, :, None, :]
+        return cos, sin
+
+    def _compute_window_sizes(self, config):
+        pattern = config.window_pattern.upper()
+        assert all(c in "SL" for c in pattern)
+        long_window = config.sequence_len
+        short_window = long_window // 2
+        char_to_window = {"L": (long_window, 0), "S": (short_window, 0)}
+        window_sizes = []
+        for layer_idx in range(config.n_layer):
+            char = pattern[layer_idx % len(pattern)]
+            window_sizes.append(char_to_window[char])
+        window_sizes[-1] = (long_window, 0)
+        return window_sizes
+
+    def forward(self, idx, targets=None, reduction='mean'):
+        B, T = idx.size()
+        assert T <= self.cos.size(1)
+        cos_sin = self.cos[:, :T], self.sin[:, :T]
+
+        x = self.transformer.wte(idx)
+        x = norm(x)
+        x0 = x
+        for i, block in enumerate(self.transformer.h):
+            x = self.resid_lambdas[i] * x + self.x0_lambdas[i] * x0
+            ve = self.value_embeds[str(i)](idx) if str(i) in self.value_embeds else None
+            x = block(x, ve, cos_sin, self.window_sizes[i])
+        x = norm(x)
+
+        softcap = 15
+        logits = self.lm_head(x)
+        logits = logits.float()
+        logits = softcap * torch.tanh(logits / softcap)
+
+        if targets is not None:
+            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1),
+                                   ignore_index=-1, reduction=reduction)
+            return loss
+        return logits
+
+
+# ---------------------------------------------------------------------------
+# Tokenizer wrapper
+# ---------------------------------------------------------------------------
+
+class Tokenizer:
+    """Minimal tokenizer wrapper."""
+    def __init__(self, enc):
+        self.enc = enc
+        self.bos_token_id = enc.encode_single_token("<|reserved_0|>")
+
+    @classmethod
+    def from_directory(cls, tokenizer_dir=TOKENIZER_DIR):
+        with open(os.path.join(tokenizer_dir, "tokenizer.pkl"), "rb") as f:
+            enc = pickle.load(f)
+        return cls(enc)
+
+    def get_vocab_size(self):
+        return self.enc.n_vocab
+
+    def get_bos_token_id(self):
+        return self.bos_token_id
+
+    def encode(self, text, prepend=None, num_threads=8):
+        if prepend is not None:
+            prepend_id = prepend if isinstance(prepend, int) else self.enc.encode_single_token(prepend)
+        if isinstance(text, str):
+            ids = self.enc.encode_ordinary(text)
+            if prepend is not None:
+                ids.insert(0, prepend_id)
+        elif isinstance(text, list):
+            ids = self.enc.encode_ordinary_batch(text, num_threads=num_threads)
+            if prepend is not None:
+                for row in ids:
+                    row.insert(0, prepend_id)
+        else:
+            raise ValueError(f"Invalid input type: {type(text)}")
+        return ids
+
+    def decode(self, ids):
+        return self.enc.decode(ids)
+
+
+# ---------------------------------------------------------------------------
+# Chat functions
+# ---------------------------------------------------------------------------
 
 def find_latest_checkpoint(checkpoints_dir="checkpoints"):
     """Find the most recent checkpoint in the directory."""
@@ -38,7 +280,6 @@ def find_latest_checkpoint(checkpoints_dir="checkpoints"):
     if not checkpoints:
         return None
     
-    # Sort by modification time
     checkpoints.sort(key=lambda f: os.path.getmtime(os.path.join(checkpoints_dir, f)))
     return os.path.join(checkpoints_dir, checkpoints[-1])
 
@@ -58,27 +299,18 @@ def generate_response(model, tokenizer, prompt, max_new_tokens=100, temperature=
             logits = model(idx)
             logits = logits[:, -1, :] / temperature
             
-            # Top-p (nucleus) sampling
-            probs = torch.softmax(logits, dim=-1)
-            sorted_probs, sorted_indices = torch.sort(probs, descending=True)
-            cumsum = torch.cumsum(sorted_probs, dim=-1)
-            
-            # Keep tokens with cumulative probability below top_p
-            sorted_indices_to_remove = cumsum > top_p
-            sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
-            sorted_indices_to_remove[..., 0] = False
-            
-            indices_to_remove = sorted_indices_to_remove.scatter(1, sorted_indices, sorted_indices_to_remove)
-            logits[0, indices_to_remove] = float('-inf')
+            # Simple top-k sampling for reliability
+            top_k = min(50, logits.size(-1))
+            top_probs, top_indices = torch.topk(logits, top_k)
+            probs = torch.zeros_like(logits).scatter_(-1, top_indices, torch.softmax(top_probs, dim=-1))
             
             # Sample from the filtered distribution
-            probs = torch.softmax(logits, dim=-1)
             next_token = torch.multinomial(probs, num_samples=1)
             
             idx = torch.cat([idx, next_token], dim=1)
             
             # Stop if we hit EOS (or a reserved token)
-            if next_token.item() >= tokenizer.enc.n_vocab - 4:
+            if next_token.item() >= tokenizer.get_vocab_size() - 4:
                 break
     
     # Decode the response (skip the prompt)
@@ -163,7 +395,8 @@ def main():
     print(f"Using device: {device}")
     
     # Load checkpoint
-    checkpoint = load_checkpoint(checkpoint_path, device)
+    print(f"Loading checkpoint: {checkpoint_path}")
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
     config_dict = checkpoint['config']
     
     # Build model config
@@ -185,6 +418,8 @@ def main():
     
     print(f"Model loaded: {config.n_layer} layers, {config.n_embd} embd dim")
     print(f"Trained for {checkpoint.get('total_training_time', 0)/3600:.1f} hours")
+    if 'val_bpb' in checkpoint:
+        print(f"Val bpb: {checkpoint['val_bpb']:.4f}")
     
     # Load tokenizer
     tokenizer = Tokenizer.from_directory()

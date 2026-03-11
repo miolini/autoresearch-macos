@@ -1,0 +1,4 @@
+commit	val_bpb	memory_gb	status	description
+814dc55	1.408009	0.0	keep	baseline
+4d1c289	1.397839	0.0	keep	reduce warmdown ratio from 0.5 to 0.3
+44506e6	1.399433	0.0	discard	restore warmdown 0.3, test checkpoint saving
