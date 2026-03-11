@@ -1,7 +1,7 @@
 commit	val_bpb	memory_gb	status	description
 814dc55	1.408009	0.0	keep	baseline
 f16e4ee	1.370347	0.0	keep	final LR 0.15
-d2ae5bb	1.369951	0.0	keep	momentum ramp 200 steps
+d2ae5bb	1.369951	0.0	keep	momentum ramp 200
 6784519	1.369392	0.0	keep	batch 2^14
 29b3a38	1.363634	0.0	keep	scalar_lr 1.0
 927a60f	1.363471	0.0	keep	embedding_lr 0.5
@@ -9,3 +9,4 @@ d2ae5bb	1.369951	0.0	keep	momentum ramp 200 steps
 ac02a06	1.360894	0.0	keep	matrix_lr 0.03
 d87a23c	1.359080	0.0	keep	matrix_lr 0.025
 affcc4f	1.357932	0.0	keep	final momentum 0.93 (BEST)
+56bd023	1.359770	0.0	keep	momentum ramp 150
