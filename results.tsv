@@ -12,3 +12,9 @@ d844272	1.750274	0.0	discard	2x EMBEDDING_LR 0.6->1.2
 0e6c5e0	1.793629	0.0	discard	remove value embeddings
 c3bdac1	1.648321	0.0	keep	halve TOTAL_BATCH_SIZE 65K->32K (-5.7%)
 bab9d9e	1.532485	0.0	keep	quarter batch 32K->16K (-7.0%)
+c7b92df	0.000000	0.0	crash	eighth batch 8K (assertion: batch < microbatch)
+ba16b77	1.535071	0.0	discard	warmdown 0.5->0.3
+700a8b9	1.557813	0.0	discard	remove weight decay
+f46bad9	1.627648	0.0	discard	add warmup 0.05
+0f96deb	1.542159	0.0	discard	DEVICE_BATCH=4 TOTAL=8K (too noisy)
+34658ab	1.461426	0.0	keep	DEPTH=4 with optimized HPs (11.5M 443 steps -4.6%)
