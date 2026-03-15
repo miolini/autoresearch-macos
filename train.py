@@ -613,7 +613,7 @@ WINDOW_PATTERN = "L"  # sliding window pattern: L=full, S=half context
 
 # Optimization
 TOTAL_BATCH_SIZE = 2**15  # ~32K tokens per optimizer step (more gradient updates)
-EMBEDDING_LR = 0.8  # learning rate for token embeddings (Adam)
+EMBEDDING_LR = 1.0  # learning rate for token embeddings (Adam)
 UNEMBEDDING_LR = 0.004  # learning rate for lm_head (Adam)
 MATRIX_LR = 0.06  # learning rate for matrix parameters (Muon)
 SCALAR_LR = 0.5  # learning rate for per-layer scalars (Adam)
