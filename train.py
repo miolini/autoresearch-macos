@@ -732,7 +732,7 @@ def get_lr_multiplier(progress):
 
 
 def get_muon_momentum(step):
-    frac = min(step / 500, 1)
+    frac = min(step / 600, 1)
     return (1 - frac) * 0.75 + frac * 0.95
 
 
