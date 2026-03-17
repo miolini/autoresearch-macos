@@ -36,6 +36,16 @@ Each experiment runs on a single GPU. The training script runs for a **fixed tim
 
 **Simplicity criterion**: All else being equal, simpler is better. A small improvement that adds ugly complexity is not worth it. Conversely, removing something and getting equal or better results is a great outcome — that's a simplification win. When evaluating whether to keep a change, weigh the complexity cost against the improvement magnitude. A 0.001 val_bpb improvement that adds 20 lines of hacky code? Probably not worth it. A 0.001 val_bpb improvement from deleting code? Definitely keep. An improvement of ~0 but much simpler code? Keep.
 
+**Research style: GO WILD.** Don't be conservative. Try radical architectural changes, unconventional optimizers, weird activation functions, dramatic model size swings, aggressive hyperparameter sweeps. If an experiment crashes, that's fine — log it and move on. Favor bold bets over incremental tweaks. Some ideas to explore early:
+- Dramatically different depth/width ratios (e.g. 2 layers very wide, or 16 layers very narrow)
+- SwiGLU, GELU, or exotic activations instead of ReLU²
+- Aggressive learning rate experiments (2x, 5x, 0.1x)
+- Removing components (value embeddings, residual lambdas) to see if they actually help
+- Different attention patterns (all local, all global, alternating)
+- Halving or doubling batch size
+- Weight tying (embedding = unembedding)
+- Different warmup/cooldown schedules
+
 **The first run**: Your very first run should always be to establish the baseline, so you will run the training script as is.
 
 ## Output format
