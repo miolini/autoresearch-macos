@@ -1,1 +1,12 @@
 commit	val_bpb	memory_gb	status	description
+5f7cb45	0.000000	0.0	crash	baseline timed out on MPS at ~150-176s per step
+f9b851d	0.000000	0.0	crash	speed up MPS path but eval timed out with batch_size=1
+8879a56	0.000000	0.0	crash	eval batch_size=8 likely died at eval start on MPS
+e5f4d7f	0.000000	0.0	crash	eval batch_size=4 still did not finish within the timeout
+b4f32b1	1.780915	0.0	discard	2-layer model finished but total_seconds 1687.4 exceeded timeout
+76a4f29	1.674650	0.0	keep	2-layer model with eval batch 64 finished within 478.9s
+5f7cb45	0.000000	0.0	crash	baseline as-is timed out on MPS with ~140-176s optimizer steps
+89cf0f3	0.000000	0.0	crash	reduce train batch to 1 fixed training speed but eval timed out using batch size 1
+8879a56	1.677615	0.0	keep	mps speedups plus smaller 3-layer 192-d model with eval batch 8 completes in 491.9s
+e5f4d7f	1.699059	0.0	discard	double train batch and eval batch on mps; worse bpb and longer total runtime
+b4f32b1	1.776064	0.0	discard	current head ran as a 2-layer 128-d model; much worse bpb and 1687.1s total runtime
