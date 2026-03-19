@@ -49,8 +49,8 @@ def norm(x):
 
 
 def has_ve(layer_idx, n_layer):
-    """Returns True if layer should have Value Embedding (alternating, last always included)."""
-    return layer_idx % 2 == (n_layer - 1) % 2
+    """Disable value embeddings in the MPS sweep to cut parameter and runtime overhead."""
+    return False
 
 
 def apply_rotary_emb(x, cos, sin):
@@ -480,9 +480,9 @@ class MuonAdamW(torch.optim.Optimizer):
 # ---------------------------------------------------------------------------
 
 # Model architecture
-ASPECT_RATIO = 64       # model_dim = depth * ASPECT_RATIO
-HEAD_DIM = 128          # target head dimension for attention
-WINDOW_PATTERN = "L"    # sliding window pattern: L=full, S=half context
+ASPECT_RATIO = 48       # model_dim = depth * ASPECT_RATIO
+HEAD_DIM = 64           # target head dimension for attention
+WINDOW_PATTERN = "S"    # sliding window pattern: L=full, S=half context
 
 # Optimization
 TOTAL_BATCH_SIZE = 2048  # one 2048-token sequence per optimizer step on MPS
@@ -497,7 +497,7 @@ WARMDOWN_RATIO = 0.5    # fraction of time budget for LR warmdown
 FINAL_LR_FRAC = 0.0     # final LR as fraction of initial
 
 # Model size
-DEPTH = 4               # number of transformer layers
+DEPTH = 3               # number of transformer layers
 DEVICE_BATCH_SIZE = 1   # keep per-step latency low enough to fit the 5-minute budget on MPS
 
 # ---------------------------------------------------------------------------
@@ -577,6 +577,8 @@ x, y, epoch = next(train_loader)  # prefetch first batch
 
 print(f"Time budget: {TIME_BUDGET}s")
 print(f"Gradient accumulation steps: {grad_accum_steps}")
+COUNTED_WARMUP_STEPS = 10 if device_type == "cuda" else 0
+print(f"Counted warmup steps: {COUNTED_WARMUP_STEPS}")
 
 # Schedules (all based on progress = training_time / TIME_BUDGET)
 
@@ -646,7 +648,7 @@ while True:
     t1 = time.time()
     dt = t1 - t0
 
-    if step > 10:
+    if step >= COUNTED_WARMUP_STEPS:
         total_training_time += dt
 
     # Logging
@@ -671,7 +673,7 @@ while True:
     step += 1
 
     # Time's up — but only stop after warmup steps so we don't count compilation
-    if step > 10 and total_training_time >= TIME_BUDGET:
+    if step >= COUNTED_WARMUP_STEPS and total_training_time >= TIME_BUDGET:
         break
 
 print()  # newline after \r training log
@@ -686,7 +688,8 @@ with autocast_ctx:
 # Final summary
 t_end = time.time()
 startup_time = t_start_training - t_start
-steady_state_mfu = 100 * num_flops_per_token * TOTAL_BATCH_SIZE * (step - 10) / total_training_time / H100_BF16_PEAK_FLOPS if total_training_time > 0 else 0
+steady_state_steps = max(step - COUNTED_WARMUP_STEPS, 0)
+steady_state_mfu = 100 * num_flops_per_token * TOTAL_BATCH_SIZE * steady_state_steps / total_training_time / H100_BF16_PEAK_FLOPS if total_training_time > 0 else 0
 if device_type == "cuda":
     peak_vram_mb = torch.cuda.max_memory_allocated() / 1024 / 1024
 else:
