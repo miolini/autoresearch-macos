@@ -499,6 +499,7 @@ FINAL_LR_FRAC = 0.0     # final LR as fraction of initial
 # Model size
 DEPTH = 3               # number of transformer layers
 DEVICE_BATCH_SIZE = 1   # keep per-step latency low enough to fit the 5-minute budget on MPS
+EVAL_BATCH_SIZE = 8     # run validation in a larger no-grad batch so experiments finish on time
 
 # ---------------------------------------------------------------------------
 # Setup: tokenizer, model, optimizer, dataloader
@@ -683,7 +684,7 @@ total_tokens = step * TOTAL_BATCH_SIZE
 # Final eval
 model.eval()
 with autocast_ctx:
-    val_bpb = evaluate_bpb(model, tokenizer, DEVICE_BATCH_SIZE)
+    val_bpb = evaluate_bpb(model, tokenizer, EVAL_BATCH_SIZE)
 
 # Final summary
 t_end = time.time()
