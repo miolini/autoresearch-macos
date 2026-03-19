@@ -485,7 +485,7 @@ HEAD_DIM = 64           # target head dimension for attention
 WINDOW_PATTERN = "S"    # sliding window pattern: L=full, S=half context
 
 # Optimization
-TOTAL_BATCH_SIZE = 2048  # one 2048-token sequence per optimizer step on MPS
+TOTAL_BATCH_SIZE = 4096  # double tokens per optimizer step to improve utilization on the tiny model
 EMBEDDING_LR = 0.6      # learning rate for token embeddings (Adam)
 UNEMBEDDING_LR = 0.004  # learning rate for lm_head (Adam)
 MATRIX_LR = 0.04        # learning rate for matrix parameters (Muon)
@@ -498,7 +498,7 @@ FINAL_LR_FRAC = 0.0     # final LR as fraction of initial
 
 # Model size
 DEPTH = 3               # number of transformer layers
-DEVICE_BATCH_SIZE = 1   # keep per-step latency low enough to fit the 5-minute budget on MPS
+DEVICE_BATCH_SIZE = 2   # still small enough for MPS, but should increase throughput over batch_size=1
 EVAL_BATCH_SIZE = 8     # run validation in a larger no-grad batch so experiments finish on time
 
 # ---------------------------------------------------------------------------
