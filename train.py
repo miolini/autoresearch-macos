@@ -480,7 +480,7 @@ class MuonAdamW(torch.optim.Optimizer):
 # ---------------------------------------------------------------------------
 
 # Model architecture
-ASPECT_RATIO = 64       # model_dim = depth * ASPECT_RATIO
+ASPECT_RATIO = 48       # model_dim = depth * ASPECT_RATIO
 HEAD_DIM = 64           # target head dimension for attention
 WINDOW_PATTERN = "S"    # sliding window pattern: L=full, S=half context
 
@@ -497,9 +497,9 @@ WARMDOWN_RATIO = 0.5    # fraction of time budget for LR warmdown
 FINAL_LR_FRAC = 0.0     # final LR as fraction of initial
 
 # Model size
-DEPTH = 2               # cut depth to make eval batch 8 more likely to fit and finish on MPS
+DEPTH = 3               # number of transformer layers
 DEVICE_BATCH_SIZE = 1   # keep per-step latency low enough to fit the 5-minute budget on MPS
-EVAL_BATCH_SIZE = 8     # keep the faster eval path on the smaller 2-layer model
+EVAL_BATCH_SIZE = 8     # run validation in a larger no-grad batch so experiments finish on time
 
 # ---------------------------------------------------------------------------
 # Setup: tokenizer, model, optimizer, dataloader
