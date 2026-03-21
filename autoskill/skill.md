@@ -14,8 +14,11 @@ When given code to explain:
 
 1. **Identify the language** and any frameworks/libraries used
 2. **State the purpose** in one sentence
-3. **Walk through the logic** step by step
-4. **Note any edge cases** or potential issues
+3. **Walk through the logic** step by step, noting:
+   - Control flow (conditions, loops, recursion)
+   - Side effects (API calls, state changes, cleanup/teardown)
+   - Dependencies and parameters that affect behavior
+4. **Note any edge cases** or potential issues (including security concerns)
 5. **Summarize** what a caller/user would experience
 
 ## Output Format
