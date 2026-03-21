@@ -45,3 +45,10 @@ When given code to explain:
 - Be accurate — don't guess at behavior you're unsure of
 - Be concise — no unnecessary words
 - Use plain language — avoid jargon unless explaining it
+
+## Always Mention When Present
+
+- Framework patterns: hooks, decorators, middleware, observers
+- Timing patterns: debouncing, throttling, polling, retries
+- Resource management: cleanup functions, disposal, unsubscribe
+- Configuration: dependency arrays, options objects, defaults
