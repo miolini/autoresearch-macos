@@ -1,1 +1,4 @@
 commit	pass_rate	status	description
+efd7bad	0.900	keep	baseline
+6d667ba	0.900	discard	add special patterns section (no improvement)
+776ee9e	1.000	keep	expand step 3: control flow, side effects, cleanup, dependencies
