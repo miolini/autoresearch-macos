@@ -21,4 +21,5 @@ d86d034	27.7946	discard	OLS analytical init (no improvement over GD)
 a3937b3	27.7487	keep	120-restart linear 0.5s each
 4208c21	27.7429	keep	300-restart linear 0.2s each
 7018e1b	27.5730	keep	400-restart linear 0.15s LR=5e-2
+7f6ba01	27.5154	keep	600-restart linear 0.1s LR=5e-2
 b4e8a51	28.6090	discard	600-restart linear 0.1s each (too short)
