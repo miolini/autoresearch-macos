@@ -17,3 +17,4 @@ d86d034	27.7946	discard	OLS analytical init (no improvement over GD)
 166e0fc	33.2034	discard	linear + residual MLP correction (overfits)
 9baa693	27.8011	discard	SGD+Nesterov LR=0.1 (same result)
 336df27	27.7709	keep	30-restart linear 2s each pick best
+3049474	27.7623	keep	60-restart linear 1s each pick best

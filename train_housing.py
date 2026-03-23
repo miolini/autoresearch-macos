@@ -39,7 +39,7 @@ BATCH_SIZE    = 32
 WARMUP_RATIO  = 0.05
 WARMDOWN_RATIO = 0.40
 
-N_RESTARTS    = 60       # train 60 short linear models 1s each, pick best val
+N_RESTARTS    = 120      # train 120 short linear models 0.5s each, pick best val
 # ============================================================
 
 TIME_BUDGET = prep.TIME_BUDGET   # seconds
