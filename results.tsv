@@ -10,3 +10,9 @@ fa0ae1e	146.3775	discard	LBFGS phase diverged
 4b490ba	55.7177	discard	depth=2 hidden=64 SiLU
 6d171d6	39.9740	discard	SiLU activation only
 dbc28d8	34.0101	discard	WD=0 no weight decay
+3bbd4cc	27.7844	keep	N_LAYERS=0 pure linear 7 params LR=1e-2
+3ed49fb	27.7928	discard	linear model full-batch LR=5e-2 (same result)
+d86d034	27.7946	discard	OLS analytical init (no improvement over GD)
+70c6cc1	27.7930	discard	HuberLoss delta=1.0 (same result)
+166e0fc	33.2034	discard	linear + residual MLP correction (overfits)
+9baa693	27.8011	discard	SGD+Nesterov LR=0.1 (same result)

@@ -16,6 +16,7 @@ Usage:
 
 from __future__ import annotations
 
+import copy
 import math
 import time
 
@@ -27,20 +28,21 @@ import prepare_housing as prep
 # ============================================================
 # HYPERPARAMETERS — modify these to experiment
 # ============================================================
-HIDDEN_DIM    = 128      # width of each hidden layer (unused when N_LAYERS=0)
-N_LAYERS      = 0        # 0 = pure linear model (Linear(n_features → 1))
-DROPOUT       = 0.0      # dropout probability (0 = disabled)
-ACTIVATION    = "relu"   # "relu" | "gelu" | "silu" | "tanh"
+N_LAYERS      = 0        # pure linear model
+HIDDEN_DIM    = 128
+DROPOUT       = 0.0
+ACTIVATION    = "relu"
 
-LEARNING_RATE = 1e-2     # higher LR ok for linear model
+LEARNING_RATE = 1e-2
 WEIGHT_DECAY  = 0.0
 BATCH_SIZE    = 32
 WARMUP_RATIO  = 0.05
 WARMDOWN_RATIO = 0.40
+
+N_RESTARTS    = 30       # train 30 short linear models, pick best val
 # ============================================================
 
-
-TIME_BUDGET = prep.TIME_BUDGET   # seconds (defined in prepare_housing.py)
+TIME_BUDGET = prep.TIME_BUDGET   # seconds
 
 
 # ---------------------------------------------------------------------------
@@ -56,15 +58,6 @@ def _activation(name: str) -> nn.Module:
 
 
 class MLP(nn.Module):
-    """
-    Fully-connected MLP for scalar regression.
-    When N_LAYERS=0, degenerates to a pure linear model: Linear(n_features → 1).
-
-    Architecture:
-        [Linear(n_features → HIDDEN_DIM) → act] × N_LAYERS
-        Linear(in_dim → 1)
-    """
-
     def __init__(self, n_features: int) -> None:
         super().__init__()
         layers: list[nn.Module] = []
@@ -78,7 +71,7 @@ class MLP(nn.Module):
         layers.append(nn.Linear(in_dim, 1))
         self.net = nn.Sequential(*layers)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:  # noqa: D401
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.net(x)
 
 
@@ -86,22 +79,14 @@ class MLP(nn.Module):
 # LR schedule helpers
 # ---------------------------------------------------------------------------
 
-def lr_multiplier(elapsed: float) -> float:
-    """
-    Piecewise LR schedule based on elapsed fraction of TIME_BUDGET:
-      0 → warmup_end  : linear warmup  0 → 1
-      warmup_end → wd : constant       1
-      wd → end        : cosine decay   1 → 0
-    """
-    p = elapsed / TIME_BUDGET
+def lr_multiplier(elapsed: float, budget: float) -> float:
+    p = elapsed / budget
     wp = WARMUP_RATIO
     wd = 1.0 - WARMDOWN_RATIO
-
     if p < wp:
         return p / (wp + 1e-9)
     if p < wd:
         return 1.0
-    # cosine warmdown
     t = (p - wd) / (1.0 - wd + 1e-9)
     return 0.5 * (1.0 + math.cos(math.pi * t))
 
@@ -109,6 +94,35 @@ def lr_multiplier(elapsed: float) -> float:
 # ---------------------------------------------------------------------------
 # Training
 # ---------------------------------------------------------------------------
+
+def train_model(model, train_loader, device, t0, t1):
+    budget = t1 - t0
+    optimizer = torch.optim.AdamW(
+        model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY,
+        betas=(0.9, 0.999),
+    )
+    loss_fn = nn.MSELoss()
+    model.train()
+    step = 0
+    done = False
+    while not done:
+        for X_batch, y_batch in train_loader:
+            now = time.perf_counter()
+            if now >= t1:
+                done = True
+                break
+            scale = lr_multiplier(now - t0, budget)
+            for pg in optimizer.param_groups:
+                pg["lr"] = LEARNING_RATE * scale
+            X_batch = X_batch.to(device)
+            y_batch = y_batch.to(device)
+            optimizer.zero_grad(set_to_none=True)
+            loss = loss_fn(model(X_batch), y_batch)
+            loss.backward()
+            optimizer.step()
+            step += 1
+    return step
+
 
 def main() -> None:
     # ---- device -------------------------------------------------------------
@@ -126,72 +140,44 @@ def main() -> None:
         batch_size=BATCH_SIZE,
     )
 
-    # ---- model --------------------------------------------------------------
-    model = MLP(n_features).to(device)
-    num_params = sum(p.numel() for p in model.parameters())
-    print(f"[train_housing] MLP params={num_params:,}  depth={N_LAYERS}  width={HIDDEN_DIM}")
+    # ---- multi-restart: divide budget evenly --------------------------------
+    t_global_start = time.perf_counter()
+    slot = TIME_BUDGET / N_RESTARTS
 
-    # ---- optimiser ----------------------------------------------------------
-    optimizer = torch.optim.AdamW(
-        model.parameters(),
-        lr=LEARNING_RATE,
-        weight_decay=WEIGHT_DECAY,
-        betas=(0.9, 0.999),
-    )
-    loss_fn = nn.MSELoss()
+    best_rmse = float("inf")
+    best_model = None
+    total_steps = 0
+    num_params = 0
 
-    # ---- training loop (time-budget based, mirrors autoresearch) ------------
-    model.train()
-    t_start = time.perf_counter()
-    t_end   = t_start + TIME_BUDGET
+    for i in range(N_RESTARTS):
+        t0 = t_global_start + i * slot
+        t1 = t0 + slot
+        now = time.perf_counter()
+        if now < t0:
+            time.sleep(t0 - now)
 
-    step = 0
-    done = False
+        model = MLP(n_features).to(device)
+        if num_params == 0:
+            num_params = sum(p.numel() for p in model.parameters())
 
-    while not done:
-        for X_batch, y_batch in train_loader:
-            now = time.perf_counter()
-            if now >= t_end:
-                done = True
-                break
+        steps = train_model(model, train_loader, device, t0, t1)
+        total_steps += steps
 
-            # LR schedule
-            scale = lr_multiplier(now - t_start)
-            for pg in optimizer.param_groups:
-                pg["lr"] = LEARNING_RATE * scale
+        rmse = prep.evaluate_rmse(model, val_loader, device, y_mean, y_std)
+        if rmse < best_rmse:
+            best_rmse = rmse
+            best_model = copy.deepcopy(model)
+            print(f"[restart {i+1}/{N_RESTARTS}] new best val_rmse={rmse:.4f}")
 
-            X_batch = X_batch.to(device)
-            y_batch = y_batch.to(device)
+    training_seconds = time.perf_counter() - t_global_start
+    val_rmse = best_rmse
+    total_seconds = time.perf_counter() - t_global_start
 
-            optimizer.zero_grad(set_to_none=True)
-            pred = model(X_batch)
-            loss = loss_fn(pred, y_batch)
-            loss.backward()
-            optimizer.step()
-
-            step += 1
-
-            if step % 200 == 0:
-                remaining = max(0.0, t_end - time.perf_counter())
-                print(
-                    f"step={step:6d}  "
-                    f"loss={loss.item():.5f}  "
-                    f"lr={LEARNING_RATE * scale:.2e}  "
-                    f"remaining={remaining:.1f}s"
-                )
-
-    training_seconds = time.perf_counter() - t_start
-
-    # ---- evaluation ---------------------------------------------------------
-    val_rmse = prep.evaluate_rmse(model, val_loader, device, y_mean, y_std)
-    total_seconds = time.perf_counter() - t_start
-
-    # ---- results block (parsed by results.tsv logging) ----------------------
     print("---")
     print(f"val_rmse:          {val_rmse:.4f}")
     print(f"training_seconds:  {training_seconds:.1f}")
     print(f"total_seconds:     {total_seconds:.1f}")
-    print(f"num_steps:         {step}")
+    print(f"num_steps:         {total_steps}")
     print(f"num_params:        {num_params}")
     print(f"depth:             {N_LAYERS}")
     print(f"hidden_dim:        {HIDDEN_DIM}")
