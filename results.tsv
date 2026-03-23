@@ -1,1 +1,12 @@
 commit	val_rmse	status	description
+b412209	32.6766	keep	baseline
+dc972eb	34.3774	discard	LR=3e-3 batch=16
+278792a	43.5088	discard	depth=1 hidden=64 (underfits)
+b5ec427	35.4875	discard	LR=1e-2 WD=1e-3 longer warmdown
+dfdea1f	33.5834	discard	BatchNorm1d after each hidden layer
+35b9a0d	36.8851	discard	full-batch size=256
+d12a3c4	33.7752	discard	multi-restart 5x12s (too short per restart)
+fa0ae1e	146.3775	discard	LBFGS phase diverged
+4b490ba	55.7177	discard	depth=2 hidden=64 SiLU
+6d171d6	39.9740	discard	SiLU activation only
+dbc28d8	34.0101	discard	WD=0 no weight decay
