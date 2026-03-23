@@ -34,3 +34,5 @@ c10b369	27.5728	discard	LR=2e-1 1500-restart 0.04s (too short)
 0ee9bea	27.4425	discard	WARMDOWN=0 no LR decay (warmdown helps)
 0e2d843	27.7900	discard	two-phase explore+fine-tune (fine-tuning destroys lucky solution)
 f003c8a	27.4072	discard	WARMUP_RATIO=0 no warmup (warmup helps)
+f177bf5	27.3305	keep	two-phase 500 explore + 500 exploit perturb=0.1
+98432fd	27.3823	discard	two-phase perturb=0.02 (too tight, same as random)

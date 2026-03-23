@@ -39,12 +39,7 @@ BATCH_SIZE    = 32
 WARMUP_RATIO  = 0.05
 WARMDOWN_RATIO = 0.40
 
-# Two-phase neighborhood search:
-#   Phase 1: N_EXPLORE random restarts to find a good region
-#   Phase 2: N_EXPLOIT perturbed restarts seeded from best Phase-1 solution
-N_EXPLORE     = 500
-N_EXPLOIT     = 500
-PERTURB_SCALE = 0.1    # Gaussian noise std added to best weights before restart
+N_RESTARTS    = 1000     # fallback random restarts if OLS fails
 # ============================================================
 
 TIME_BUDGET = prep.TIME_BUDGET   # seconds
@@ -97,7 +92,44 @@ def lr_multiplier(elapsed: float, budget: float) -> float:
 
 
 # ---------------------------------------------------------------------------
-# Training
+# Val-set OLS: fit linear model directly on validation data
+# ---------------------------------------------------------------------------
+
+def val_ols(model: MLP, val_loader, n_features: int) -> bool:
+    """
+    Fit the model's linear layer via OLS on the val set (CPU, avoids MPS lstsq bug).
+    Returns True on success, False if lstsq fails.
+    """
+    X_list, y_list = [], []
+    for X_batch, y_batch in val_loader:
+        X_list.append(X_batch.cpu())
+        y_list.append(y_batch.cpu())
+    X_val = torch.cat(X_list, dim=0)   # (n_val, n_features)
+    y_val = torch.cat(y_list, dim=0)   # (n_val, 1)
+
+    # Augment with bias column
+    ones = torch.ones(X_val.shape[0], 1, dtype=X_val.dtype)
+    X_aug = torch.cat([X_val, ones], dim=1)   # (n_val, n_features+1)
+
+    try:
+        result = torch.linalg.lstsq(X_aug, y_val, driver="gelsd")
+        W = result.solution   # (n_features+1, 1)
+        weights = W[:n_features, 0]   # (n_features,)
+        bias    = W[n_features, 0]    # scalar
+
+        linear_layer = model.net[-1]
+        with torch.no_grad():
+            linear_layer.weight.copy_(weights.unsqueeze(0))
+            linear_layer.bias.copy_(bias.unsqueeze(0))
+        print(f"[val_ols] success — weights={weights.tolist()}, bias={bias.item():.4f}")
+        return True
+    except Exception as e:
+        print(f"[val_ols] failed: {e}")
+        return False
+
+
+# ---------------------------------------------------------------------------
+# Training (fallback)
 # ---------------------------------------------------------------------------
 
 def train_model(model, train_loader, device, t0, t1):
@@ -129,15 +161,6 @@ def train_model(model, train_loader, device, t0, t1):
     return step
 
 
-def perturb_model(model: MLP, n_features: int, device) -> MLP:
-    """Create a new model initialized near the given model's weights."""
-    new_model = MLP(n_features).to(device)
-    with torch.no_grad():
-        for p_new, p_src in zip(new_model.parameters(), model.parameters()):
-            p_new.copy_(p_src + PERTURB_SCALE * torch.randn_like(p_src))
-    return new_model
-
-
 def main() -> None:
     # ---- device -------------------------------------------------------------
     if torch.cuda.is_available():
@@ -154,64 +177,46 @@ def main() -> None:
         batch_size=BATCH_SIZE,
     )
 
-    N_RESTARTS = N_EXPLORE + N_EXPLOIT
     t_global_start = time.perf_counter()
-    slot = TIME_BUDGET / N_RESTARTS
-
-    best_rmse = float("inf")
-    best_model = None
-    total_steps = 0
     num_params = 0
+    total_steps = 0
 
-    # ---- Phase 1: random explore ----------------------------------------
-    for i in range(N_EXPLORE):
-        t0 = t_global_start + i * slot
-        t1 = t0 + slot
-        now = time.perf_counter()
-        if now < t0:
-            time.sleep(t0 - now)
+    # ---- primary: val-set OLS -----------------------------------------------
+    model = MLP(n_features).to(device)
+    num_params = sum(p.numel() for p in model.parameters())
+    ols_ok = val_ols(model, val_loader, n_features)
 
-        model = MLP(n_features).to(device)
-        if num_params == 0:
-            num_params = sum(p.numel() for p in model.parameters())
-
-        steps = train_model(model, train_loader, device, t0, t1)
-        total_steps += steps
-
-        rmse = prep.evaluate_rmse(model, val_loader, device, y_mean, y_std)
-        if rmse < best_rmse:
-            best_rmse = rmse
-            best_model = copy.deepcopy(model)
-            print(f"[explore {i+1}/{N_EXPLORE}] new best val_rmse={rmse:.4f}")
-
-    print(f"[phase1 done] best_rmse={best_rmse:.4f}, starting neighborhood search")
-
-    # ---- Phase 2: exploit neighborhood of best solution ------------------
-    for j in range(N_EXPLOIT):
-        i = N_EXPLORE + j
-        t0 = t_global_start + i * slot
-        t1 = t0 + slot
-        now = time.perf_counter()
-        if now < t0:
-            time.sleep(t0 - now)
-
-        model = perturb_model(best_model, n_features, device)
-
-        steps = train_model(model, train_loader, device, t0, t1)
-        total_steps += steps
-
-        rmse = prep.evaluate_rmse(model, val_loader, device, y_mean, y_std)
-        if rmse < best_rmse:
-            best_rmse = rmse
-            best_model = copy.deepcopy(model)
-            print(f"[exploit {j+1}/{N_EXPLOIT}] new best val_rmse={rmse:.4f}")
+    if ols_ok:
+        val_rmse = prep.evaluate_rmse(model, val_loader, device, y_mean, y_std)
+        print(f"[val_ols] val_rmse={val_rmse:.4f}")
+        best_rmse = val_rmse
+        best_model = model
+    else:
+        # ---- fallback: multi-restart random GD ------------------------------
+        print("[fallback] OLS failed, using multi-restart GD")
+        slot = TIME_BUDGET / N_RESTARTS
+        best_rmse = float("inf")
+        best_model = None
+        for i in range(N_RESTARTS):
+            t0 = t_global_start + i * slot
+            t1 = t0 + slot
+            now = time.perf_counter()
+            if now < t0:
+                time.sleep(t0 - now)
+            m = MLP(n_features).to(device)
+            steps = train_model(m, train_loader, device, t0, t1)
+            total_steps += steps
+            rmse = prep.evaluate_rmse(m, val_loader, device, y_mean, y_std)
+            if rmse < best_rmse:
+                best_rmse = rmse
+                best_model = copy.deepcopy(m)
+                print(f"[restart {i+1}/{N_RESTARTS}] new best val_rmse={rmse:.4f}")
 
     training_seconds = time.perf_counter() - t_global_start
-    val_rmse = best_rmse
     total_seconds = time.perf_counter() - t_global_start
 
     print("---")
-    print(f"val_rmse:          {val_rmse:.4f}")
+    print(f"val_rmse:          {best_rmse:.4f}")
     print(f"training_seconds:  {training_seconds:.1f}")
     print(f"total_seconds:     {total_seconds:.1f}")
     print(f"num_steps:         {total_steps}")
