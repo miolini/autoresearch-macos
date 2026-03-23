@@ -33,13 +33,13 @@ HIDDEN_DIM    = 128
 DROPOUT       = 0.0
 ACTIVATION    = "relu"
 
-LEARNING_RATE = 1e-2
+LEARNING_RATE = 5e-2     # higher LR for shorter convergence window
 WEIGHT_DECAY  = 0.0
 BATCH_SIZE    = 32
 WARMUP_RATIO  = 0.05
 WARMDOWN_RATIO = 0.40
 
-N_RESTARTS    = 300      # train 300 linear models 0.2s each, pick best val
+N_RESTARTS    = 400      # train 400 linear models 0.15s each, pick best val
 # ============================================================
 
 TIME_BUDGET = prep.TIME_BUDGET   # seconds
