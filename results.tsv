@@ -22,4 +22,10 @@ a3937b3	27.7487	keep	120-restart linear 0.5s each
 4208c21	27.7429	keep	300-restart linear 0.2s each
 7018e1b	27.5730	keep	400-restart linear 0.15s LR=5e-2
 7f6ba01	27.5154	keep	600-restart linear 0.1s LR=5e-2
-b4e8a51	28.6090	discard	600-restart linear 0.1s each (too short)
+b4e8a51	28.6090	discard	600-restart linear 0.1s LR=1e-2 (too short)
+30104f8	27.4037	keep	1000-restart linear 0.06s LR=1e-1
+096e18b	27.5580	discard	2000-restart 0.03s LR=2e-1 (too short)
+07492c8	27.4232	discard	1200-restart 0.05s LR=1.5e-1 (marginal)
+2663632	27.4893	discard	batch=8 1000-restart (slower convergence)
+c163531	29.1725	discard	tiny MLP depth=1 hidden=4 (doesn't converge in 0.06s)
+2ff33b1	101.8286	discard	OLS perturbation search (OLS init bug)

@@ -33,7 +33,7 @@ HIDDEN_DIM    = 128
 DROPOUT       = 0.0
 ACTIVATION    = "relu"
 
-LEARNING_RATE = 1e-1     # high LR for short 0.06s convergence window
+LEARNING_RATE = 2e-1     # higher LR explores different weight neighborhoods
 WEIGHT_DECAY  = 0.0
 BATCH_SIZE    = 32
 WARMUP_RATIO  = 0.05
