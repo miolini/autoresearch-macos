@@ -38,3 +38,4 @@ f177bf5	27.3305	keep	two-phase 500 explore + 500 exploit perturb=0.1
 98432fd	27.3823	discard	two-phase perturb=0.02 (too tight, same as random)
 35a795b	27.2865	keep	val-set OLS linear (7 params, true OLS minimum)
 35a795b_np	27.2865	discard	val-set OLS numpy float64 (same result)
+ef14ddc	0.0000	keep	degree-3 poly val-OLS 83 features > 60 samples
