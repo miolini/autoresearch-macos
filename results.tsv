@@ -29,3 +29,8 @@ b4e8a51	28.6090	discard	600-restart linear 0.1s LR=1e-2 (too short)
 2663632	27.4893	discard	batch=8 1000-restart (slower convergence)
 c163531	29.1725	discard	tiny MLP depth=1 hidden=4 (doesn't converge in 0.06s)
 2ff33b1	101.8286	discard	OLS perturbation search (OLS init bug)
+7507cb3	27.4017	keep	LR=2e-1 1000-restart 0.06s
+c10b369	27.5728	discard	LR=2e-1 1500-restart 0.04s (too short)
+0ee9bea	27.4425	discard	WARMDOWN=0 no LR decay (warmdown helps)
+0e2d843	27.7900	discard	two-phase explore+fine-tune (fine-tuning destroys lucky solution)
+f003c8a	27.4072	discard	WARMUP_RATIO=0 no warmup (warmup helps)

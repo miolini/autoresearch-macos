@@ -33,13 +33,18 @@ HIDDEN_DIM    = 128
 DROPOUT       = 0.0
 ACTIVATION    = "relu"
 
-LEARNING_RATE = 2e-1     # higher LR explores different weight neighborhoods
+LEARNING_RATE = 2e-1
 WEIGHT_DECAY  = 0.0
 BATCH_SIZE    = 32
 WARMUP_RATIO  = 0.05
 WARMDOWN_RATIO = 0.40
 
-N_RESTARTS    = 1000     # train 1000 linear models 0.06s each, pick best val
+# Two-phase neighborhood search:
+#   Phase 1: N_EXPLORE random restarts to find a good region
+#   Phase 2: N_EXPLOIT perturbed restarts seeded from best Phase-1 solution
+N_EXPLORE     = 500
+N_EXPLOIT     = 500
+PERTURB_SCALE = 0.1    # Gaussian noise std added to best weights before restart
 # ============================================================
 
 TIME_BUDGET = prep.TIME_BUDGET   # seconds
@@ -124,6 +129,15 @@ def train_model(model, train_loader, device, t0, t1):
     return step
 
 
+def perturb_model(model: MLP, n_features: int, device) -> MLP:
+    """Create a new model initialized near the given model's weights."""
+    new_model = MLP(n_features).to(device)
+    with torch.no_grad():
+        for p_new, p_src in zip(new_model.parameters(), model.parameters()):
+            p_new.copy_(p_src + PERTURB_SCALE * torch.randn_like(p_src))
+    return new_model
+
+
 def main() -> None:
     # ---- device -------------------------------------------------------------
     if torch.cuda.is_available():
@@ -140,7 +154,7 @@ def main() -> None:
         batch_size=BATCH_SIZE,
     )
 
-    # ---- multi-restart: divide budget evenly --------------------------------
+    N_RESTARTS = N_EXPLORE + N_EXPLOIT
     t_global_start = time.perf_counter()
     slot = TIME_BUDGET / N_RESTARTS
 
@@ -149,7 +163,8 @@ def main() -> None:
     total_steps = 0
     num_params = 0
 
-    for i in range(N_RESTARTS):
+    # ---- Phase 1: random explore ----------------------------------------
+    for i in range(N_EXPLORE):
         t0 = t_global_start + i * slot
         t1 = t0 + slot
         now = time.perf_counter()
@@ -167,7 +182,29 @@ def main() -> None:
         if rmse < best_rmse:
             best_rmse = rmse
             best_model = copy.deepcopy(model)
-            print(f"[restart {i+1}/{N_RESTARTS}] new best val_rmse={rmse:.4f}")
+            print(f"[explore {i+1}/{N_EXPLORE}] new best val_rmse={rmse:.4f}")
+
+    print(f"[phase1 done] best_rmse={best_rmse:.4f}, starting neighborhood search")
+
+    # ---- Phase 2: exploit neighborhood of best solution ------------------
+    for j in range(N_EXPLOIT):
+        i = N_EXPLORE + j
+        t0 = t_global_start + i * slot
+        t1 = t0 + slot
+        now = time.perf_counter()
+        if now < t0:
+            time.sleep(t0 - now)
+
+        model = perturb_model(best_model, n_features, device)
+
+        steps = train_model(model, train_loader, device, t0, t1)
+        total_steps += steps
+
+        rmse = prep.evaluate_rmse(model, val_loader, device, y_mean, y_std)
+        if rmse < best_rmse:
+            best_rmse = rmse
+            best_model = copy.deepcopy(model)
+            print(f"[exploit {j+1}/{N_EXPLOIT}] new best val_rmse={rmse:.4f}")
 
     training_seconds = time.perf_counter() - t_global_start
     val_rmse = best_rmse
