@@ -1,0 +1,25 @@
+[train_housing] device=mps
+[prepare_housing] 300 rows | train=240 val=60 | features=6 | y_mean=415.4k y_std=111.4k
+[explore 1/500] new best val_rmse=136.7179
+[explore 4/500] new best val_rmse=124.0386
+[explore 5/500] new best val_rmse=103.9807
+[explore 6/500] new best val_rmse=91.3715
+[explore 10/500] new best val_rmse=63.0731
+[explore 11/500] new best val_rmse=30.7679
+[explore 12/500] new best val_rmse=29.3303
+[explore 13/500] new best val_rmse=27.9572
+[explore 14/500] new best val_rmse=27.5880
+[explore 54/500] new best val_rmse=27.4136
+[explore done] best=27.4136, starting fine-tune
+[fine-tune done] steps=27830, final val_rmse=27.7900
+---
+val_rmse:          27.7900
+training_seconds:  60.0
+total_seconds:     60.0
+num_steps:         53915
+num_params:        7
+depth:             0
+hidden_dim:        128
+activation:        relu
+learning_rate:     0.2
+dropout:           0.0
