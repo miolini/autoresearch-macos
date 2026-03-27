@@ -18,3 +18,12 @@ AGENTS.md
 
 # Experimental code/artifacts
 dev/
+
+# Training artifacts (generated per-run)
+run.log
+run_*.log
+results.tsv
+model.pt
+
+# Drafts
+linkedin_post.md

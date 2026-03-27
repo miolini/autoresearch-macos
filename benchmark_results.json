@@ -1,0 +1,23 @@
+{
+  "model": {
+    "params_M": 11.5,
+    "depth": 4,
+    "dim": 256
+  },
+  "perplexity": {
+    "specialized_bpb": 1.645,
+    "general_bpb": 2.146,
+    "improvement_pct": 23.3
+  },
+  "speed": {
+    "single_latency_ms": 27.2,
+    "single_tps": 75352,
+    "batch_tps": 75133,
+    "time_per_10k_sec": 1.0
+  },
+  "cost": {
+    "our_cost": 0,
+    "gpt4o_cost": 15000,
+    "filings": 80000
+  }
+}
