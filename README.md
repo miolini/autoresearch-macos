@@ -2,7 +2,7 @@
 
 A tiny (11.5M parameter) GPT language model trained exclusively on SEC 10-K filings from financial companies. Built using [Karpathy's autoresearch](https://github.com/karpathy/autoresearch) framework with an AI agent (Claude) autonomously running experiments on a MacBook Air. ~20 experiments at 5 minutes each, ~2 hours of total GPU time.
 
-**[Model on HuggingFace](https://huggingface.co/HarryS64/10k-financial-slm)** · **[GitHub Repo](https://github.com/harryschaefer93/autoresearch-10k-macos/tree/autoresearch/10k-mar26)**
+**[Model on HuggingFace](https://huggingface.co/HarryS64/10k-financial-slm)** · **[GitHub Repo](https://github.com/harryschaefer93/autoresearch-10k-macos)**
 
 <p align="center">
   <img src="images/training-monitor.jpeg" width="48%" alt="Live training monitor showing benchmark race, loss curve, and thermal status" />
