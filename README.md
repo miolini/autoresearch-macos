@@ -18,7 +18,7 @@ A tiny (11.5M parameter) GPT language model trained exclusively on SEC 10-K fili
 | Improvement over general model | **23.3%** |
 | Inference speed | 75,000+ tok/sec on MacBook Air |
 | Time per 10-K filing | ~1 second |
-| Cost to process all 80K SEC filings | **$0** (vs $15K+ via API) |
+| Cost to process all 80K SEC filings | **$0** (vs $21K+ via API) |
 
 ## The Question
 
@@ -113,17 +113,19 @@ The fix was embarrassingly simple: **put the laptop on a dehumidifier** (see pho
 | One full 10-K filing (~75K tokens) | ~1 second | - |
 | All 80K SEC EDGAR filings | ~22 hours | - |
 
-### 3. Cost to Process Full SEC Database (~80K filings, ~6B tokens)
+### 3. Cost to Process Full SEC Database (~80K filings, ~8.4B tokens)
 
-| Approach | Price/1M input tokens | Cost (6B tokens) |
-|----------|----------------------|-------------------|
-| GPT-4o API | $2.50 | ~$15,000 |
-| Claude Sonnet 4.6 API | $3.00 | ~$18,000 |
-| Claude Haiku 4.5 API | $1.00 | ~$6,000 |
-| GPT-4o-mini API | $0.15 | ~$900 |
+*Methodology: 1,131 filings averaged 120,910 tokens each (our 8K-vocab tokenizer). Converted to GPT-equivalent tokens at 0.875x ratio (accounting for vocabulary efficiency difference). Extrapolated across all 79,513 10-K filings in SEC EDGAR (2015-2025).*
+
+| Approach | Price/1M input tokens | Cost (8.4B tokens) |
+|----------|----------------------|---------------------|
+| GPT-4o API | $2.50 | ~$21,000 |
+| Claude Sonnet 4.6 API | $3.00 | ~$25,000 |
+| Claude Haiku 4.5 API | $1.00 | ~$8,400 |
+| GPT-4o-mini API | $0.15 | ~$1,260 |
 | **This model (local)** | **$0** | **$0** |
 
-*Prices as of March 2026. Input tokens only (processing/embedding), no output generation.*
+*Prices as of March 2026. Input tokens only (processing/embedding), no output generation. Batch API discounts (50% off) would roughly halve these costs.*
 
 ## Potential Uses
 
