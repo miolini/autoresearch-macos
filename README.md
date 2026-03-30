@@ -8,7 +8,7 @@ The idea: give an AI agent a small but real LLM training setup and let it experi
 
 ## Open source project worth to look at
 
-Open source collabaration platform for agentic swarms in organizations and communityies. 
+Open source collabaration platform for agentic swarms in organizations and communities. 
 
 [SentientWave Automata](https://github.com/sentientwave/automata)
 
