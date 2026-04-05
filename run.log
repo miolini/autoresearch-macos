@@ -1,0 +1,307 @@
+/Users/jimmyyeung/Code/autoresearch-macos/titanic-eda-feature-engineering-beginners.py:78: FutureWarning: A value is trying to be set on a copy of a DataFrame or Series through chained assignment using an inplace method.
+The behavior will change in pandas 3.0. This inplace method will never work because the intermediate object on which we are setting values always behaves as a copy.
+
+For example, when doing 'df[col].method(value, inplace=True)', try using 'df.method({col: value}, inplace=True)' or df[col] = df[col].method(value) instead, to perform the operation inplace on the original object.
+
+
+  joined['Embarked'].fillna("S", inplace=True) # From Google I have found that they both deparated from Southampton (S)
+/Users/jimmyyeung/Code/autoresearch-macos/titanic-eda-feature-engineering-beginners.py:233: SettingWithCopyWarning: 
+A value is trying to be set on a copy of a slice from a DataFrame.
+Try using .loc[row_indexer,col_indexer] = value instead
+
+See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy
+  train['Family_Survival_Rate'] = train_family_survival_rate
+/Users/jimmyyeung/Code/autoresearch-macos/titanic-eda-feature-engineering-beginners.py:234: SettingWithCopyWarning: 
+A value is trying to be set on a copy of a slice from a DataFrame.
+Try using .loc[row_indexer,col_indexer] = value instead
+
+See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy
+  train['Family_Survival_Rate_NA'] = train_family_survival_rate_NA
+/Users/jimmyyeung/Code/autoresearch-macos/titanic-eda-feature-engineering-beginners.py:235: SettingWithCopyWarning: 
+A value is trying to be set on a copy of a slice from a DataFrame.
+Try using .loc[row_indexer,col_indexer] = value instead
+
+See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy
+  test['Family_Survival_Rate'] = test_family_survival_rate
+/Users/jimmyyeung/Code/autoresearch-macos/titanic-eda-feature-engineering-beginners.py:236: SettingWithCopyWarning: 
+A value is trying to be set on a copy of a slice from a DataFrame.
+Try using .loc[row_indexer,col_indexer] = value instead
+
+See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy
+  test['Family_Survival_Rate_NA'] = test_family_survival_rate_NA
+/Users/jimmyyeung/Code/autoresearch-macos/titanic-eda-feature-engineering-beginners.py:262: SettingWithCopyWarning: 
+A value is trying to be set on a copy of a slice from a DataFrame.
+Try using .loc[row_indexer,col_indexer] = value instead
+
+See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy
+  train['Ticket_Survival_Rate'] = train_ticket_survival_rate
+/Users/jimmyyeung/Code/autoresearch-macos/titanic-eda-feature-engineering-beginners.py:263: SettingWithCopyWarning: 
+A value is trying to be set on a copy of a slice from a DataFrame.
+Try using .loc[row_indexer,col_indexer] = value instead
+
+See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy
+  train['Ticket_Survival_Rate_NA'] = train_ticket_survival_rate_NA
+/Users/jimmyyeung/Code/autoresearch-macos/titanic-eda-feature-engineering-beginners.py:264: SettingWithCopyWarning: 
+A value is trying to be set on a copy of a slice from a DataFrame.
+Try using .loc[row_indexer,col_indexer] = value instead
+
+See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy
+  test['Ticket_Survival_Rate'] = test_ticket_survival_rate
+/Users/jimmyyeung/Code/autoresearch-macos/titanic-eda-feature-engineering-beginners.py:265: SettingWithCopyWarning: 
+A value is trying to be set on a copy of a slice from a DataFrame.
+Try using .loc[row_indexer,col_indexer] = value instead
+
+See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy
+  test['Ticket_Survival_Rate_NA'] = test_ticket_survival_rate_NA
+/Users/jimmyyeung/Code/autoresearch-macos/titanic-eda-feature-engineering-beginners.py:271: SettingWithCopyWarning: 
+A value is trying to be set on a copy of a slice from a DataFrame.
+Try using .loc[row_indexer,col_indexer] = value instead
+
+See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy
+  df['Survival_Rate'] = (df['Ticket_Survival_Rate'] + df['Family_Survival_Rate']) / 2
+/Users/jimmyyeung/Code/autoresearch-macos/titanic-eda-feature-engineering-beginners.py:272: SettingWithCopyWarning: 
+A value is trying to be set on a copy of a slice from a DataFrame.
+Try using .loc[row_indexer,col_indexer] = value instead
+
+See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy
+  df['Survival_Rate_NA'] = (df['Ticket_Survival_Rate_NA'] + df['Family_Survival_Rate_NA']) / 2
+/Users/jimmyyeung/Code/autoresearch-macos/titanic-eda-feature-engineering-beginners.py:271: SettingWithCopyWarning: 
+A value is trying to be set on a copy of a slice from a DataFrame.
+Try using .loc[row_indexer,col_indexer] = value instead
+
+See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy
+  df['Survival_Rate'] = (df['Ticket_Survival_Rate'] + df['Family_Survival_Rate']) / 2
+/Users/jimmyyeung/Code/autoresearch-macos/titanic-eda-feature-engineering-beginners.py:272: SettingWithCopyWarning: 
+A value is trying to be set on a copy of a slice from a DataFrame.
+Try using .loc[row_indexer,col_indexer] = value instead
+
+See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy
+  df['Survival_Rate_NA'] = (df['Ticket_Survival_Rate_NA'] + df['Family_Survival_Rate_NA']) / 2
+/Users/jimmyyeung/Code/autoresearch-macos/titanic-eda-feature-engineering-beginners.py:283: SettingWithCopyWarning: 
+A value is trying to be set on a copy of a slice from a DataFrame.
+Try using .loc[row_indexer,col_indexer] = value instead
+
+See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy
+  df[feature] = LabelEncoder().fit_transform(df[feature])
+/Users/jimmyyeung/Code/autoresearch-macos/titanic-eda-feature-engineering-beginners.py:283: SettingWithCopyWarning: 
+A value is trying to be set on a copy of a slice from a DataFrame.
+Try using .loc[row_indexer,col_indexer] = value instead
+
+See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy
+  df[feature] = LabelEncoder().fit_transform(df[feature])
+/Users/jimmyyeung/Code/autoresearch-macos/titanic-eda-feature-engineering-beginners.py:283: SettingWithCopyWarning: 
+A value is trying to be set on a copy of a slice from a DataFrame.
+Try using .loc[row_indexer,col_indexer] = value instead
+
+See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy
+  df[feature] = LabelEncoder().fit_transform(df[feature])
+/Users/jimmyyeung/Code/autoresearch-macos/titanic-eda-feature-engineering-beginners.py:283: SettingWithCopyWarning: 
+A value is trying to be set on a copy of a slice from a DataFrame.
+Try using .loc[row_indexer,col_indexer] = value instead
+
+See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy
+  df[feature] = LabelEncoder().fit_transform(df[feature])
+/Users/jimmyyeung/Code/autoresearch-macos/titanic-eda-feature-engineering-beginners.py:283: SettingWithCopyWarning: 
+A value is trying to be set on a copy of a slice from a DataFrame.
+Try using .loc[row_indexer,col_indexer] = value instead
+
+See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy
+  df[feature] = LabelEncoder().fit_transform(df[feature])
+/Users/jimmyyeung/Code/autoresearch-macos/titanic-eda-feature-engineering-beginners.py:283: SettingWithCopyWarning: 
+A value is trying to be set on a copy of a slice from a DataFrame.
+Try using .loc[row_indexer,col_indexer] = value instead
+
+See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy
+  df[feature] = LabelEncoder().fit_transform(df[feature])
+/Users/jimmyyeung/Code/autoresearch-macos/titanic-eda-feature-engineering-beginners.py:283: SettingWithCopyWarning: 
+A value is trying to be set on a copy of a slice from a DataFrame.
+Try using .loc[row_indexer,col_indexer] = value instead
+
+See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy
+  df[feature] = LabelEncoder().fit_transform(df[feature])
+/Users/jimmyyeung/Code/autoresearch-macos/titanic-eda-feature-engineering-beginners.py:283: SettingWithCopyWarning: 
+A value is trying to be set on a copy of a slice from a DataFrame.
+Try using .loc[row_indexer,col_indexer] = value instead
+
+See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy
+  df[feature] = LabelEncoder().fit_transform(df[feature])
+/Users/jimmyyeung/Code/autoresearch-macos/titanic-eda-feature-engineering-beginners.py:283: SettingWithCopyWarning: 
+A value is trying to be set on a copy of a slice from a DataFrame.
+Try using .loc[row_indexer,col_indexer] = value instead
+
+See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy
+  df[feature] = LabelEncoder().fit_transform(df[feature])
+/Users/jimmyyeung/Code/autoresearch-macos/titanic-eda-feature-engineering-beginners.py:283: SettingWithCopyWarning: 
+A value is trying to be set on a copy of a slice from a DataFrame.
+Try using .loc[row_indexer,col_indexer] = value instead
+
+See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy
+  df[feature] = LabelEncoder().fit_transform(df[feature])
+/Users/jimmyyeung/Code/autoresearch-macos/titanic-eda-feature-engineering-beginners.py:283: SettingWithCopyWarning: 
+A value is trying to be set on a copy of a slice from a DataFrame.
+Try using .loc[row_indexer,col_indexer] = value instead
+
+See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy
+  df[feature] = LabelEncoder().fit_transform(df[feature])
+/Users/jimmyyeung/Code/autoresearch-macos/titanic-eda-feature-engineering-beginners.py:283: SettingWithCopyWarning: 
+A value is trying to be set on a copy of a slice from a DataFrame.
+Try using .loc[row_indexer,col_indexer] = value instead
+
+See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy
+  df[feature] = LabelEncoder().fit_transform(df[feature])
+/Users/jimmyyeung/Code/autoresearch-macos/titanic-eda-feature-engineering-beginners.py:283: SettingWithCopyWarning: 
+A value is trying to be set on a copy of a slice from a DataFrame.
+Try using .loc[row_indexer,col_indexer] = value instead
+
+See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy
+  df[feature] = LabelEncoder().fit_transform(df[feature])
+/Users/jimmyyeung/Code/autoresearch-macos/titanic-eda-feature-engineering-beginners.py:283: SettingWithCopyWarning: 
+A value is trying to be set on a copy of a slice from a DataFrame.
+Try using .loc[row_indexer,col_indexer] = value instead
+
+See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy
+  df[feature] = LabelEncoder().fit_transform(df[feature])
+/Users/jimmyyeung/Code/autoresearch-macos/titanic-eda-feature-engineering-beginners.py:319: SettingWithCopyWarning: 
+A value is trying to be set on a copy of a slice from a DataFrame
+
+See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy
+  test.drop('Survived', axis=1, inplace=True)
+[Parallel(n_jobs=-1)]: Using backend ThreadingBackend with 8 concurrent workers.
+[Parallel(n_jobs=-1)]: Done  34 tasks      | elapsed:    0.0s
+[Parallel(n_jobs=-1)]: Done 184 tasks      | elapsed:    0.1s
+[Parallel(n_jobs=-1)]: Done 434 tasks      | elapsed:    0.2s
+[Parallel(n_jobs=-1)]: Done 784 tasks      | elapsed:    0.4s
+[Parallel(n_jobs=-1)]: Done 1234 tasks      | elapsed:    0.6s
+[Parallel(n_jobs=-1)]: Done 1750 out of 1750 | elapsed:    0.9s finished
+[Parallel(n_jobs=8)]: Using backend ThreadingBackend with 8 concurrent workers.
+[Parallel(n_jobs=8)]: Done  34 tasks      | elapsed:    0.0s
+[Parallel(n_jobs=8)]: Done 184 tasks      | elapsed:    0.0s
+[Parallel(n_jobs=8)]: Done 434 tasks      | elapsed:    0.0s
+[Parallel(n_jobs=8)]: Done 784 tasks      | elapsed:    0.1s
+[Parallel(n_jobs=8)]: Done 1234 tasks      | elapsed:    0.1s
+[Parallel(n_jobs=8)]: Done 1750 out of 1750 | elapsed:    0.1s finished
+[Parallel(n_jobs=8)]: Using backend ThreadingBackend with 8 concurrent workers.
+[Parallel(n_jobs=8)]: Done  34 tasks      | elapsed:    0.0s
+[Parallel(n_jobs=8)]: Done 184 tasks      | elapsed:    0.0s
+[Parallel(n_jobs=8)]: Done 434 tasks      | elapsed:    0.0s
+[Parallel(n_jobs=8)]: Done 784 tasks      | elapsed:    0.1s
+[Parallel(n_jobs=8)]: Done 1234 tasks      | elapsed:    0.1s
+[Parallel(n_jobs=8)]: Done 1750 out of 1750 | elapsed:    0.1s finished
+[Parallel(n_jobs=-1)]: Using backend ThreadingBackend with 8 concurrent workers.
+[Parallel(n_jobs=-1)]: Done  34 tasks      | elapsed:    0.0s
+[Parallel(n_jobs=-1)]: Done 184 tasks      | elapsed:    0.1s
+[Parallel(n_jobs=-1)]: Done 434 tasks      | elapsed:    0.3s
+[Parallel(n_jobs=-1)]: Done 784 tasks      | elapsed:    0.4s
+[Parallel(n_jobs=-1)]: Done 1234 tasks      | elapsed:    0.7s
+[Parallel(n_jobs=-1)]: Done 1750 out of 1750 | elapsed:    0.9s finished
+[Parallel(n_jobs=8)]: Using backend ThreadingBackend with 8 concurrent workers.
+[Parallel(n_jobs=8)]: Done  34 tasks      | elapsed:    0.0s
+[Parallel(n_jobs=8)]: Done 184 tasks      | elapsed:    0.0s
+[Parallel(n_jobs=8)]: Done 434 tasks      | elapsed:    0.0s
+[Parallel(n_jobs=8)]: Done 784 tasks      | elapsed:    0.1s
+[Parallel(n_jobs=8)]: Done 1234 tasks      | elapsed:    0.1s
+[Parallel(n_jobs=8)]: Done 1750 out of 1750 | elapsed:    0.1s finished
+[Parallel(n_jobs=8)]: Using backend ThreadingBackend with 8 concurrent workers.
+[Parallel(n_jobs=8)]: Done  34 tasks      | elapsed:    0.0s
+[Parallel(n_jobs=8)]: Done 184 tasks      | elapsed:    0.0s
+[Parallel(n_jobs=8)]: Done 434 tasks      | elapsed:    0.0s
+[Parallel(n_jobs=8)]: Done 784 tasks      | elapsed:    0.1s
+[Parallel(n_jobs=8)]: Done 1234 tasks      | elapsed:    0.1s
+[Parallel(n_jobs=8)]: Done 1750 out of 1750 | elapsed:    0.1s finished
+[Parallel(n_jobs=-1)]: Using backend ThreadingBackend with 8 concurrent workers.
+[Parallel(n_jobs=-1)]: Done  34 tasks      | elapsed:    0.0s
+[Parallel(n_jobs=-1)]: Done 184 tasks      | elapsed:    0.1s
+[Parallel(n_jobs=-1)]: Done 434 tasks      | elapsed:    0.2s
+[Parallel(n_jobs=-1)]: Done 784 tasks      | elapsed:    0.4s
+[Parallel(n_jobs=-1)]: Done 1234 tasks      | elapsed:    0.8s
+[Parallel(n_jobs=-1)]: Done 1750 out of 1750 | elapsed:    1.0s finished
+[Parallel(n_jobs=8)]: Using backend ThreadingBackend with 8 concurrent workers.
+[Parallel(n_jobs=8)]: Done  34 tasks      | elapsed:    0.0s
+[Parallel(n_jobs=8)]: Done 184 tasks      | elapsed:    0.0s
+[Parallel(n_jobs=8)]: Done 434 tasks      | elapsed:    0.0s
+[Parallel(n_jobs=8)]: Done 784 tasks      | elapsed:    0.1s
+[Parallel(n_jobs=8)]: Done 1234 tasks      | elapsed:    0.1s
+[Parallel(n_jobs=8)]: Done 1750 out of 1750 | elapsed:    0.1s finished
+[Parallel(n_jobs=8)]: Using backend ThreadingBackend with 8 concurrent workers.
+[Parallel(n_jobs=8)]: Done  34 tasks      | elapsed:    0.0s
+[Parallel(n_jobs=8)]: Done 184 tasks      | elapsed:    0.0s
+[Parallel(n_jobs=8)]: Done 434 tasks      | elapsed:    0.0s
+[Parallel(n_jobs=8)]: Done 784 tasks      | elapsed:    0.1s
+[Parallel(n_jobs=8)]: Done 1234 tasks      | elapsed:    0.1s
+[Parallel(n_jobs=8)]: Done 1750 out of 1750 | elapsed:    0.1s finished
+[Parallel(n_jobs=-1)]: Using backend ThreadingBackend with 8 concurrent workers.
+[Parallel(n_jobs=-1)]: Done  34 tasks      | elapsed:    0.0s
+[Parallel(n_jobs=-1)]: Done 184 tasks      | elapsed:    0.1s
+[Parallel(n_jobs=-1)]: Done 434 tasks      | elapsed:    0.2s
+[Parallel(n_jobs=-1)]: Done 784 tasks      | elapsed:    0.4s
+[Parallel(n_jobs=-1)]: Done 1234 tasks      | elapsed:    0.6s
+[Parallel(n_jobs=-1)]: Done 1750 out of 1750 | elapsed:    0.9s finished
+[Parallel(n_jobs=8)]: Using backend ThreadingBackend with 8 concurrent workers.
+[Parallel(n_jobs=8)]: Done  34 tasks      | elapsed:    0.0s
+[Parallel(n_jobs=8)]: Done 184 tasks      | elapsed:    0.0s
+[Parallel(n_jobs=8)]: Done 434 tasks      | elapsed:    0.0s
+[Parallel(n_jobs=8)]: Done 784 tasks      | elapsed:    0.2s
+[Parallel(n_jobs=8)]: Done 1234 tasks      | elapsed:    0.2s
+[Parallel(n_jobs=8)]: Done 1750 out of 1750 | elapsed:    0.3s finished
+[Parallel(n_jobs=8)]: Using backend ThreadingBackend with 8 concurrent workers.
+[Parallel(n_jobs=8)]: Done  34 tasks      | elapsed:    0.0s
+[Parallel(n_jobs=8)]: Done 184 tasks      | elapsed:    0.0s
+[Parallel(n_jobs=8)]: Done 434 tasks      | elapsed:    0.0s
+[Parallel(n_jobs=8)]: Done 784 tasks      | elapsed:    0.1s
+[Parallel(n_jobs=8)]: Done 1234 tasks      | elapsed:    0.1s
+[Parallel(n_jobs=8)]: Done 1750 out of 1750 | elapsed:    0.1s finished
+[Parallel(n_jobs=-1)]: Using backend ThreadingBackend with 8 concurrent workers.
+[Parallel(n_jobs=-1)]: Done  34 tasks      | elapsed:    0.0s
+[Parallel(n_jobs=-1)]: Done 184 tasks      | elapsed:    0.1s
+[Parallel(n_jobs=-1)]: Done 434 tasks      | elapsed:    0.2s
+[Parallel(n_jobs=-1)]: Done 784 tasks      | elapsed:    0.4s
+[Parallel(n_jobs=-1)]: Done 1234 tasks      | elapsed:    0.6s
+[Parallel(n_jobs=-1)]: Done 1750 out of 1750 | elapsed:    0.9s finished
+[Parallel(n_jobs=8)]: Using backend ThreadingBackend with 8 concurrent workers.
+[Parallel(n_jobs=8)]: Done  34 tasks      | elapsed:    0.0s
+[Parallel(n_jobs=8)]: Done 184 tasks      | elapsed:    0.0s
+[Parallel(n_jobs=8)]: Done 434 tasks      | elapsed:    0.0s
+[Parallel(n_jobs=8)]: Done 784 tasks      | elapsed:    0.1s
+[Parallel(n_jobs=8)]: Done 1234 tasks      | elapsed:    0.1s
+[Parallel(n_jobs=8)]: Done 1750 out of 1750 | elapsed:    0.1s finished
+[Parallel(n_jobs=8)]: Using backend ThreadingBackend with 8 concurrent workers.
+[Parallel(n_jobs=8)]: Done  34 tasks      | elapsed:    0.0s
+[Parallel(n_jobs=8)]: Done 184 tasks      | elapsed:    0.0s
+[Parallel(n_jobs=8)]: Done 434 tasks      | elapsed:    0.0s
+[Parallel(n_jobs=8)]: Done 784 tasks      | elapsed:    0.1s
+[Parallel(n_jobs=8)]: Done 1234 tasks      | elapsed:    0.1s
+[Parallel(n_jobs=8)]: Done 1750 out of 1750 | elapsed:    0.1s finished
+X_train shape: (891, 26)
+y_train shape: (891,)
+X_test shape: (418, 26)
+Fold 1
+
+Fold 1 OOB Score: 0.8567415730337079
+
+Fold 2
+
+Fold 2 OOB Score: 0.844319775596073
+
+Fold 3
+
+Fold 3 OOB Score: 0.847124824684432
+
+Fold 4
+
+Fold 4 OOB Score: 0.8373071528751753
+
+Fold 5
+
+Fold 5 OOB Score: 0.8401122019635343
+
+Average OOB Score: 0.8451211056305845
+---
+oob:          0.845121
+time: 8.2
+N_folds:      5
+seed:      42
+n_estimaors:   1750
+max_depth:        8
+min_samples_split:     4
+min_samples_leaf:            4
+max_features:            log2
