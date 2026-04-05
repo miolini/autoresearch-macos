@@ -339,9 +339,9 @@ print('X_test shape: {}'.format(test.shape))
 
 SEED = 42
 N_ESTIMATORS = 1750
-MAX_DEPTH = 7
-MIN_SAMPLES_SPLIT = 6
-MIN_SAMPLES_LEAF = 6
+MAX_DEPTH = 8
+MIN_SAMPLES_SPLIT = 4
+MIN_SAMPLES_LEAF = 4
 MAX_FEATURES = 'sqrt'
 
 rf = RandomForestClassifier(criterion='gini',
