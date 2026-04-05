@@ -342,7 +342,7 @@ N_ESTIMATORS = 1750
 MAX_DEPTH = 8
 MIN_SAMPLES_SPLIT = 4
 MIN_SAMPLES_LEAF = 4
-MAX_FEATURES = 'sqrt'
+MAX_FEATURES = 'log2'
 
 rf = RandomForestClassifier(criterion='gini',
                            n_estimators=N_ESTIMATORS,
