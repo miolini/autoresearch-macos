@@ -77,8 +77,9 @@ For a thin local launcher/dashboard, run:
 
 That opens a local web UI with:
 
-- a prompt-composer for the current autoresearch repo
+- a chat-style prompt composer and local transcript for the current autoresearch repo
 - a second ToMX profile that reuses the external ToM workspace plus its repo-local agent TOMLs
+- a separate `Send To Codex` path so prompt delivery is distinct from direct run buttons
 - lightweight buttons for readiness checks and bounded run launching
 
 ## Project structure

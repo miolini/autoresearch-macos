@@ -87,7 +87,9 @@ The dashboard exposes:
 
 - an `Autoresearch MacOS` profile for this repository
 - a `ToMX Local Quality` profile that reuses the external ToMX workspace and agent TOMLs
-- suggested prompts, profile-aware prompt composition, and lightweight run/status controls
+- a local chat-style transcript with prompt history and automatic run-summary messages
+- profile-aware prompt composition plus a `Send To Codex` action that targets `Codex.app` on this Mac
+- lightweight run/status controls kept separate from prompt delivery
 
 ## References
 

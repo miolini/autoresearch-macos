@@ -5,13 +5,10 @@ from __future__ import annotations
 
 import argparse
 import json
-import mimetypes
-import os
 import socket
 import subprocess
 import sys
 import threading
-import time
 import tomllib
 import webbrowser
 from collections import deque
@@ -21,6 +18,10 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
 
 from autoresearch_ops import parse_summary_lines, repo_root
 
@@ -37,6 +38,7 @@ CURRENT_TOMX_SKILL = Path("/Users/stephenbeale/.codex/skills/tomx/SKILL.md")
 EXTERNAL_TOMX_ROOT = Path("/Users/stephenbeale/Projects/ToM_AI_Research_Team")
 EXTERNAL_AGENTS_DIR = EXTERNAL_TOMX_ROOT / ".codex" / "agents"
 EXTERNAL_AGENTS_README = EXTERNAL_AGENTS_DIR / "README.md"
+CHAT_HISTORY_PATH = REPO_ROOT / ".omx" / "state" / "dashboard-chat-history.json"
 
 
 def now_iso() -> str:
@@ -72,6 +74,138 @@ def maybe_git_status(path: Path) -> dict[str, Any]:
     except Exception:
         pass
     return status
+
+
+def ensure_chat_history_store() -> dict[str, list[dict[str, Any]]]:
+    CHAT_HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
+    if not CHAT_HISTORY_PATH.exists():
+        CHAT_HISTORY_PATH.write_text(json.dumps({}, indent=2), encoding="utf-8")
+        return {}
+    try:
+        data = json.loads(CHAT_HISTORY_PATH.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        data = {}
+    if isinstance(data, dict):
+        return data
+    return {}
+
+
+def load_chat_history() -> dict[str, list[dict[str, Any]]]:
+    return ensure_chat_history_store()
+
+
+def save_chat_history(history: dict[str, list[dict[str, Any]]]) -> None:
+    CHAT_HISTORY_PATH.write_text(json.dumps(history, indent=2), encoding="utf-8")
+
+
+def append_chat_entry(
+    profile_id: str,
+    role: str,
+    title: str,
+    text: str,
+    *,
+    meta: dict[str, Any] | None = None,
+) -> dict[str, list[dict[str, Any]]]:
+    history = load_chat_history()
+    entries = history.setdefault(profile_id, [])
+    entries.append(
+        {
+            "id": f"{profile_id}-{int(datetime.now(timezone.utc).timestamp() * 1000)}",
+            "role": role,
+            "title": title,
+            "text": text,
+            "timestamp": now_iso(),
+            "meta": meta or {},
+        }
+    )
+    history[profile_id] = entries[-80:]
+    save_chat_history(history)
+    return history
+
+
+def format_job_summary(job: "JobRecord") -> tuple[str, str]:
+    title = f"{job.action_label} {job.status}"
+    summary = job.summary or {}
+    if not summary:
+        return title, f"{job.profile_title}: {job.action_label} finished with status `{job.status}`."
+
+    if job.profile_id == "autoresearch":
+        lines = [
+            f"Status: `{job.status}`",
+            f"val_bpb: `{summary.get('val_bpb', 'n/a')}`",
+            f"peak_vram_mb: `{summary.get('peak_vram_mb', 'n/a')}`",
+            f"log: `{summary.get('log_path', 'run.log')}`",
+        ]
+        return title, "\n".join(lines)
+
+    lines = [
+        f"Status: `{job.status}`",
+        f"decision: `{summary.get('decision', 'n/a')}`",
+    ]
+    for key in (
+        "mean_candidate_ToMCoordScore",
+        "mean_candidate_deadlock_rate",
+        "candidate_ToMCoordScore",
+        "candidate_deadlock_rate",
+        "selection_path",
+    ):
+        value = summary.get(key)
+        if value is not None:
+            lines.append(f"{key}: `{value}`")
+    return title, "\n".join(lines)
+
+
+def codex_app_available() -> bool:
+    return Path("/Applications/Codex.app").exists()
+
+
+def send_prompt_to_codex_app(prompt: str, *, dry_run: bool = False) -> dict[str, Any]:
+    if not codex_app_available():
+        raise RuntimeError("Codex.app is not installed at /Applications/Codex.app")
+
+    if dry_run:
+        return {
+            "sent": False,
+            "copied_to_clipboard": False,
+            "target_app": "Codex",
+            "dry_run": True,
+            "mode": "dry_run",
+        }
+
+    subprocess.run(["pbcopy"], input=prompt, text=True, check=True)
+    subprocess.run(["open", "-a", "Codex"], check=False)
+    script = """
+tell application "Codex" to activate
+delay 0.25
+tell application "System Events"
+    keystroke "v" using command down
+    delay 0.15
+    key code 36
+end tell
+"""
+    completed = subprocess.run(
+        ["osascript", "-e", script],
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+    if completed.returncode != 0:
+        return {
+            "sent": False,
+            "copied_to_clipboard": True,
+            "target_app": "Codex",
+            "opened_app": True,
+            "mode": "clipboard_only",
+            "automation_error": completed.stderr.strip()
+            or "AppleScript could not drive Codex automatically.",
+        }
+    return {
+        "sent": True,
+        "copied_to_clipboard": True,
+        "target_app": "Codex",
+        "opened_app": True,
+        "mode": "submitted",
+    }
 
 
 def parse_tom_selection(output_root: Path) -> dict[str, Any]:
@@ -342,6 +476,8 @@ class JobManager:
                     if step.summary:
                         job.summary = step.summary
                         break
+            title, text = format_job_summary(job)
+            append_chat_entry(job.profile_id, "system", title, text, meta={"job_id": job.id})
         finally:
             with self._lock:
                 if job.finished_at is None:
@@ -539,6 +675,7 @@ def initial_status_by_profile() -> dict[str, dict[str, Any]]:
 
 
 STATUS_BY_PROFILE = initial_status_by_profile()
+CHAT_HISTORY = load_chat_history()
 
 
 def make_autoresearch_job(profile: dict[str, Any], action_id: str, params: dict[str, Any]) -> JobRecord:
@@ -641,6 +778,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     "default_profile_id": "autoresearch",
                     "current_job": JOB_MANAGER.current().to_payload() if JOB_MANAGER.current() else None,
                     "status_by_profile": STATUS_BY_PROFILE,
+                    "chat_history": load_chat_history(),
+                    "codex_app_available": codex_app_available(),
                 }
             )
             return
@@ -649,6 +788,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 {
                     "current_job": JOB_MANAGER.current().to_payload() if JOB_MANAGER.current() else None,
                     "status_by_profile": STATUS_BY_PROFILE,
+                    "chat_history": load_chat_history(),
                 }
             )
             return
@@ -717,16 +857,112 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     "message": completed.stdout.strip() or f"Created autoresearch/{tag}",
                     "status": STATUS_BY_PROFILE[profile_id],
                 }
+            if action_id == "send_prompt_to_codex":
+                prompt = params.get("prompt", "").strip()
+                if not prompt:
+                    raise ValueError("No prompt provided.")
+                history = append_chat_entry(
+                    profile_id,
+                    "user",
+                    "Prompt sent to Codex",
+                    prompt,
+                    meta={
+                        "agent_id": params.get("agent_id"),
+                        "run_label": params.get("run_label"),
+                    },
+                )
+                delivery = send_prompt_to_codex_app(prompt, dry_run=bool(params.get("dry_run")))
+                history = append_chat_entry(
+                    profile_id,
+                    "system",
+                    "Codex delivery",
+                    (
+                        "Prompt delivery prepared for Codex.app."
+                        if delivery.get("dry_run")
+                        else "Prompt copied to the clipboard, Codex was opened, and the prompt was submitted."
+                        if delivery.get("mode") == "submitted"
+                        else "Prompt copied to the clipboard and Codex was opened. If it did not auto-submit, press Cmd-V then Enter."
+                    ),
+                    meta=delivery,
+                )
+                return {
+                    "message": (
+                        "Prompt sent to Codex."
+                        if delivery.get("mode") == "submitted" or delivery.get("dry_run")
+                        else "Prompt copied and Codex opened. If needed, just press Cmd-V then Enter."
+                    ),
+                    "chat_history": history,
+                    "status": STATUS_BY_PROFILE.get(profile_id),
+                }
             if action_id == "run_autoresearch_train":
                 job = make_autoresearch_job(profile, action_id, params)
+                append_chat_entry(
+                    profile_id,
+                    "system",
+                    "Job started",
+                    f"Started `{job.action_label}` in `{job.cwd}`.",
+                    meta={"job_id": job.id},
+                )
                 JOB_MANAGER.start(job)
-                return {"message": "Autoresearch run started.", "job": job.to_payload()}
+                return {
+                    "message": "Autoresearch run started.",
+                    "job": job.to_payload(),
+                    "chat_history": load_chat_history(),
+                }
 
         if profile_id == "tomx":
+            if action_id == "send_prompt_to_codex":
+                prompt = params.get("prompt", "").strip()
+                if not prompt:
+                    raise ValueError("No prompt provided.")
+                history = append_chat_entry(
+                    profile_id,
+                    "user",
+                    "Prompt sent to Codex",
+                    prompt,
+                    meta={
+                        "agent_id": params.get("agent_id"),
+                        "run_label": params.get("run_label"),
+                    },
+                )
+                delivery = send_prompt_to_codex_app(prompt, dry_run=bool(params.get("dry_run")))
+                history = append_chat_entry(
+                    profile_id,
+                    "system",
+                    "Codex delivery",
+                    (
+                        "Prompt delivery prepared for Codex.app."
+                        if delivery.get("dry_run")
+                        else "Prompt copied to the clipboard, Codex was opened, and the prompt was submitted."
+                        if delivery.get("mode") == "submitted"
+                        else "Prompt copied to the clipboard and Codex was opened. If it did not auto-submit, press Cmd-V then Enter."
+                    ),
+                    meta=delivery,
+                )
+                return {
+                    "message": (
+                        "Prompt sent to Codex."
+                        if delivery.get("mode") == "submitted" or delivery.get("dry_run")
+                        else "Prompt copied and Codex opened. If needed, just press Cmd-V then Enter."
+                    ),
+                    "chat_history": history,
+                    "status": STATUS_BY_PROFILE.get(profile_id),
+                }
             if action_id in {"tomx_smoke_then_gate", "tomx_quick_gate_3seed"}:
                 job = make_tomx_job(profile, action_id, params)
+                append_chat_entry(
+                    profile_id,
+                    "system",
+                    "Job started",
+                    f"Started `{job.action_label}` in `{job.cwd}`.",
+                    meta={"job_id": job.id},
+                )
                 JOB_MANAGER.start(job)
-                return {"message": f"{job.action_label} started.", "job": job.to_payload()}
+                return {
+                    "message": f"{job.action_label} started.",
+                    "job": job.to_payload(),
+                    "chat_history": load_chat_history(),
+                }
 
         raise ValueError(f"Unsupported action: {action_id}")
 

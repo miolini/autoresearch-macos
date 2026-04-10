@@ -283,6 +283,55 @@
       gap: 12px;
     }
 
+    .chat-history {
+      border-radius: 22px;
+      border: 1px solid var(--line);
+      background: rgba(255, 253, 249, 0.92);
+      padding: 14px;
+      min-height: 260px;
+      max-height: 420px;
+      overflow: auto;
+      display: grid;
+      gap: 12px;
+    }
+
+    .message {
+      border-radius: 20px;
+      padding: 14px;
+      border: 1px solid var(--line);
+      background: var(--panel-strong);
+    }
+
+    .message.user {
+      background: linear-gradient(180deg, rgba(198, 93, 59, 0.1), rgba(255, 250, 242, 0.98));
+    }
+
+    .message.system {
+      background: linear-gradient(180deg, rgba(15, 118, 110, 0.08), rgba(255, 250, 242, 0.98));
+    }
+
+    .message header {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: baseline;
+      margin-bottom: 8px;
+      font-size: 0.82rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      font-weight: 700;
+    }
+
+    .message pre {
+      margin: 0;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: var(--mono);
+      font-size: 0.88rem;
+      line-height: 1.5;
+    }
+
     .bubble {
       border-radius: 22px;
       padding: 16px;
@@ -415,6 +464,11 @@
           </div>
 
           <div class="bubble">
+            <header>Chat</header>
+            <div id="chatHistory" class="chat-history"></div>
+          </div>
+
+          <div class="bubble">
             <header>Suggested Prompts</header>
             <div id="suggestions" class="stack"></div>
           </div>
@@ -452,6 +506,7 @@
 
         <div class="toolbar action-row">
           <button id="copyPromptButton" class="primary" type="button">Copy Prompt</button>
+          <button id="sendPromptButton" class="secondary" type="button">Send To Codex</button>
           <button id="refreshStatusButton" class="secondary" type="button">Refresh Status</button>
           <button id="stopJobButton" class="warn" type="button">Stop Current Job</button>
         </div>
@@ -498,11 +553,14 @@
       lastActionMessage: "",
       currentJob: null,
       statusByProfile: {},
+      chatHistory: {},
+      codexAppAvailable: false,
     };
 
     const els = {
       profiles: document.getElementById("profiles"),
       profileSummary: document.getElementById("profileSummary"),
+      chatHistory: document.getElementById("chatHistory"),
       suggestions: document.getElementById("suggestions"),
       promptPreview: document.getElementById("promptPreview"),
       agentSelect: document.getElementById("agentSelect"),
@@ -515,6 +573,7 @@
       statusCards: document.getElementById("statusCards"),
       actionBar: document.getElementById("actionBar"),
       copyPromptButton: document.getElementById("copyPromptButton"),
+      sendPromptButton: document.getElementById("sendPromptButton"),
       refreshStatusButton: document.getElementById("refreshStatusButton"),
       stopJobButton: document.getElementById("stopJobButton"),
       logTail: document.getElementById("logTail"),
@@ -747,6 +806,32 @@
       els.promptPreview.textContent = buildPrompt();
     }
 
+    function renderChatHistory() {
+      const profile = currentProfile();
+      els.chatHistory.innerHTML = "";
+      if (!profile) {
+        return;
+      }
+      const messages = state.chatHistory[profile.id] || [];
+      if (!messages.length) {
+        els.chatHistory.innerHTML = `<div class="response-card"><strong>No messages yet</strong><div class="subtle">Send a prompt to Codex or start a run to build a transcript here.</div></div>`;
+        return;
+      }
+      messages.forEach((message) => {
+        const node = document.createElement("div");
+        node.className = `message ${message.role || "system"}`;
+        node.innerHTML = `
+          <header>
+            <span>${message.title || message.role || "Message"}</span>
+            <span class="mini">${message.timestamp || ""}</span>
+          </header>
+          <pre>${message.text || ""}</pre>
+        `;
+        els.chatHistory.appendChild(node);
+      });
+      els.chatHistory.scrollTop = els.chatHistory.scrollHeight;
+    }
+
     function renderStatusCards() {
       const profile = currentProfile();
       els.statusCards.innerHTML = "";
@@ -839,6 +924,7 @@
       renderSuggestions();
       renderDocs();
       renderProfileSummary();
+      renderChatHistory();
       renderPrompt();
       renderStatusCards();
       renderActions();
@@ -872,6 +958,8 @@
       state.profiles = payload.profiles;
       state.currentJob = payload.current_job;
       state.statusByProfile = payload.status_by_profile || {};
+      state.chatHistory = payload.chat_history || {};
+      state.codexAppAvailable = Boolean(payload.codex_app_available);
       if (!state.selectedProfileId && state.profiles[0]) {
         state.selectedProfileId = payload.default_profile_id || state.profiles[0].id;
         applyProfileDefaults(currentProfile());
@@ -913,6 +1001,9 @@
         if (payload.status) {
           state.statusByProfile[profile.id] = payload.status;
         }
+        if (payload.chat_history) {
+          state.chatHistory = payload.chat_history;
+        }
         if (payload.job) {
           state.currentJob = payload.job;
         }
@@ -947,9 +1038,39 @@
         if (payload.status_by_profile) {
           state.statusByProfile = {...state.statusByProfile, ...payload.status_by_profile};
         }
+        if (payload.chat_history) {
+          state.chatHistory = payload.chat_history;
+        }
         renderJob();
+        renderChatHistory();
       } catch (error) {
         state.lastActionMessage = error.message;
+      }
+    }
+
+    async function sendPromptToCodex() {
+      const profile = currentProfile();
+      if (!profile) {
+        return;
+      }
+      try {
+        const payload = await postJSON("/api/action", {
+          profile_id: profile.id,
+          action_id: "send_prompt_to_codex",
+          params: {
+            prompt: buildPrompt(),
+            agent_id: state.selectedAgentId,
+            run_label: els.runLabel.value.trim(),
+          },
+        });
+        state.lastActionMessage = payload.message || "Prompt sent to Codex.";
+        if (payload.chat_history) {
+          state.chatHistory = payload.chat_history;
+        }
+        renderAll();
+      } catch (error) {
+        state.lastActionMessage = error.message;
+        renderAll();
       }
     }
 
@@ -969,6 +1090,7 @@
       state.lastActionMessage = "Prompt copied to clipboard.";
       renderAll();
     });
+    els.sendPromptButton.addEventListener("click", sendPromptToCodex);
     els.refreshStatusButton.addEventListener("click", refreshStatus);
     els.stopJobButton.addEventListener("click", stopCurrentJob);
 
