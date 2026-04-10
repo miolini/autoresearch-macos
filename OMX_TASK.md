@@ -25,6 +25,17 @@ Preferred directions:
 - lightweight auxiliary losses
 - observation-history tuning
 
+Issue-note habit:
+
+- whenever a weakness or hypothesis is identified, record it in two forms:
+  - a short human-readable label
+  - a more detailed mechanism description
+- example short labels:
+  - `softness is ambiguous`
+  - `cooperative moderate cases over-probe`
+  - `false_friend is a recurring weakness`
+- keep using the short label alongside the detailed description in summaries and follow-up notes so humans can reason about the failure family quickly
+
 Forbidden directions:
 
 - benchmark redesign
