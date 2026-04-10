@@ -67,6 +67,8 @@ Hi have a look at program.md and let's kick off a new experiment! let's do the s
 
 The `program.md` file is essentially a super lightweight "skill".
 
+There is now also a repo-local Codex skill at `.codex/skills/autoresearch-lab/SKILL.md` that packages the experiment loop with helper scripts for setup checks, branch creation, bounded runs, log parsing, and `results.tsv` updates.
+
 ## Project structure
 
 ```text

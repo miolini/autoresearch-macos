@@ -2,6 +2,8 @@
 
 This is an experiment to have the LLM do its own research.
 
+Note: the repo now also includes a repo-local Codex skill at `.codex/skills/autoresearch-lab/`. This file remains a compatibility prompt surface, but the skill is preferred because it bundles deterministic helpers for setup, runs, log parsing, and `results.tsv` updates.
+
 ## Setup
 
 To set up a new experiment, work with the user to:

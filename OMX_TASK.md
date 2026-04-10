@@ -40,5 +40,4 @@ Forbidden directions:
 
 - benchmark redesign
 - multi-file refactors
-- Azure work
-- dashboard work
+
