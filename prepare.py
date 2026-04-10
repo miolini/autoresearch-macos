@@ -169,7 +169,11 @@ def train_tokenizer():
     print("Tokenizer: training BPE tokenizer...")
     t0 = time.time()
 
-    tokenizer = rustbpe.Tokenizer()
+    # rustbpe API names can vary across versions; resolve at runtime.
+    tokenizer_cls = getattr(rustbpe, "Tokenizer", None) or getattr(rustbpe, "BPETokenizer", None)
+    if tokenizer_cls is None:
+        raise RuntimeError("rustbpe tokenizer class not found (expected Tokenizer or BPETokenizer)")
+    tokenizer = tokenizer_cls()
     vocab_size_no_special = VOCAB_SIZE - len(SPECIAL_TOKENS)
     tokenizer.train_from_iterator(text_iterator(), vocab_size_no_special, pattern=SPLIT_PATTERN)
 
@@ -237,15 +241,18 @@ class Tokenizer:
         return self.bos_token_id
 
     def encode(self, text, prepend=None, num_threads=8):
+        prepend_id = None
         if prepend is not None:
             prepend_id = prepend if isinstance(prepend, int) else self.enc.encode_single_token(prepend)
         if isinstance(text, str):
             ids = self.enc.encode_ordinary(text)
             if prepend is not None:
+                assert prepend_id is not None
                 ids.insert(0, prepend_id)
         elif isinstance(text, list):
             ids = self.enc.encode_ordinary_batch(text, num_threads=num_threads)
             if prepend is not None:
+                assert prepend_id is not None
                 for row in ids:
                     row.insert(0, prepend_id)
         else:

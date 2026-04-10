@@ -19,6 +19,7 @@ Primary comparison target:
 - current incumbent snapshot
 
 Preferred directions:
+
 - belief-to-policy gating
 - deadlock-aware micro-improvements
 - lightweight auxiliary losses

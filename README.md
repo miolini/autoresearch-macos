@@ -8,7 +8,7 @@ The idea: give an AI agent a small but real LLM training setup and let it experi
 
 ## Open source project worth to look at
 
-Open source collabaration platform for agentic swarms in organizations and communityies. 
+Open source collabaration platform for agentic swarms in organizations and communityies.
 
 [SentientWave Automata](https://github.com/sentientwave/automata)
 
@@ -49,7 +49,7 @@ If the above commands all work ok, your setup is working and you can go into aut
 
 Simply spin up your Claude/Codex or whatever you want in this repo (and disable all permissions), then you can prompt something like:
 
-```
+```text
 Hi have a look at program.md and let's kick off a new experiment! let's do the setup first.
 ```
 
@@ -57,7 +57,7 @@ The `program.md` file is essentially a super lightweight "skill".
 
 ## Project structure
 
-```
+```text
 prepare.py      — constants, data prep + runtime utilities (do not modify)
 train.py        — model, optimizer, training loop (agent modifies this)
 program.md      — agent instructions
