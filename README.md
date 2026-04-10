@@ -69,6 +69,18 @@ The `program.md` file is essentially a super lightweight "skill".
 
 There is now also a repo-local Codex skill at `.codex/skills/autoresearch-lab/SKILL.md` that packages the experiment loop with helper scripts for setup checks, branch creation, bounded runs, log parsing, and `results.tsv` updates.
 
+For a thin local launcher/dashboard, run:
+
+```bash
+./autoresearch-dashboard
+```
+
+That opens a local web UI with:
+
+- a prompt-composer for the current autoresearch repo
+- a second ToMX profile that reuses the external ToM workspace plus its repo-local agent TOMLs
+- lightweight buttons for readiness checks and bounded run launching
+
 ## Project structure
 
 ```text

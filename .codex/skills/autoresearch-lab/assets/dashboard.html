@@ -1,0 +1,982 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Autoresearch Lab</title>
+  <style>
+    :root {
+      --bg: #f6f1e8;
+      --panel: rgba(255, 252, 247, 0.9);
+      --panel-strong: #fffaf2;
+      --ink: #1f2933;
+      --muted: #56616b;
+      --line: rgba(31, 41, 51, 0.1);
+      --accent: #0f766e;
+      --accent-soft: rgba(15, 118, 110, 0.12);
+      --warm: #c65d3b;
+      --warm-soft: rgba(198, 93, 59, 0.12);
+      --shadow: 0 18px 48px rgba(54, 40, 21, 0.08);
+      --mono: "SFMono-Regular", "Menlo", "Monaco", monospace;
+      --sans: "Avenir Next", "Helvetica Neue", "Segoe UI", sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: var(--sans);
+      color: var(--ink);
+      background:
+        radial-gradient(circle at top left, rgba(15, 118, 110, 0.12), transparent 28%),
+        radial-gradient(circle at top right, rgba(198, 93, 59, 0.14), transparent 24%),
+        linear-gradient(180deg, #fbf7f0 0%, var(--bg) 100%);
+      min-height: 100vh;
+    }
+
+    .shell {
+      width: min(1380px, calc(100vw - 32px));
+      margin: 24px auto 40px;
+    }
+
+    .hero {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: flex-start;
+      margin-bottom: 18px;
+    }
+
+    .hero-copy h1 {
+      margin: 0;
+      font-size: clamp(2rem, 3vw, 3.2rem);
+      line-height: 0.95;
+      letter-spacing: -0.04em;
+    }
+
+    .hero-copy p {
+      margin: 10px 0 0;
+      color: var(--muted);
+      max-width: 760px;
+      font-size: 1rem;
+      line-height: 1.5;
+    }
+
+    .hero-badge {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 14px 16px;
+      box-shadow: var(--shadow);
+      min-width: 280px;
+    }
+
+    .hero-badge strong {
+      display: block;
+      font-size: 0.9rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+
+    .hero-badge code {
+      display: block;
+      font-family: var(--mono);
+      font-size: 0.9rem;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 320px minmax(0, 1fr) 360px;
+      gap: 18px;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      box-shadow: var(--shadow);
+      padding: 18px;
+      min-height: 180px;
+      backdrop-filter: blur(16px);
+    }
+
+    .panel h2 {
+      margin: 0 0 10px;
+      font-size: 1rem;
+      text-transform: uppercase;
+      letter-spacing: 0.09em;
+      color: var(--muted);
+    }
+
+    .stack {
+      display: grid;
+      gap: 12px;
+    }
+
+    .profile-card,
+    .chip,
+    .agent-card,
+    .doc-card,
+    .suggestion-card,
+    .metric-card,
+    .response-card {
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 14px;
+      background: var(--panel-strong);
+    }
+
+    .profile-card.active,
+    .agent-card.active,
+    .suggestion-card.active {
+      border-color: rgba(15, 118, 110, 0.55);
+      background: linear-gradient(180deg, rgba(15, 118, 110, 0.12), rgba(255, 250, 242, 0.96));
+    }
+
+    .profile-card button,
+    .agent-card button,
+    .suggestion-card button,
+    .doc-card button,
+    .action-row button,
+    .toolbar button {
+      appearance: none;
+      border: none;
+      background: transparent;
+      padding: 0;
+      width: 100%;
+      color: inherit;
+      text-align: left;
+      cursor: pointer;
+      font: inherit;
+    }
+
+    .profile-card strong,
+    .agent-card strong,
+    .suggestion-card strong,
+    .metric-card strong,
+    .response-card strong {
+      display: block;
+      font-size: 1rem;
+      margin-bottom: 6px;
+    }
+
+    .subtle {
+      color: var(--muted);
+      font-size: 0.92rem;
+      line-height: 1.45;
+    }
+
+    .pill-row,
+    .action-row,
+    .doc-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .chip {
+      padding: 10px 12px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      font-weight: 600;
+      font-size: 0.92rem;
+    }
+
+    .chip.warm {
+      background: var(--warm-soft);
+      color: var(--warm);
+    }
+
+    .composer {
+      display: grid;
+      gap: 14px;
+    }
+
+    .field {
+      display: grid;
+      gap: 8px;
+    }
+
+    .field label {
+      font-size: 0.83rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+    }
+
+    textarea,
+    input,
+    select {
+      width: 100%;
+      border-radius: 16px;
+      border: 1px solid rgba(31, 41, 51, 0.16);
+      padding: 12px 14px;
+      font: inherit;
+      color: var(--ink);
+      background: #fffdf9;
+    }
+
+    textarea {
+      min-height: 108px;
+      resize: vertical;
+      line-height: 1.5;
+    }
+
+    .row-two {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .row-three {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .toolbar button,
+    .action-row button {
+      border-radius: 16px;
+      border: 1px solid transparent;
+      padding: 12px 14px;
+      font-weight: 700;
+      text-align: center;
+      transition: transform 140ms ease, box-shadow 140ms ease;
+    }
+
+    .toolbar button.primary,
+    .action-row button.primary {
+      background: linear-gradient(135deg, #14532d, #0f766e);
+      color: white;
+      box-shadow: 0 10px 20px rgba(15, 118, 110, 0.22);
+    }
+
+    .toolbar button.secondary,
+    .action-row button.secondary {
+      background: white;
+      border-color: rgba(31, 41, 51, 0.14);
+      color: var(--ink);
+    }
+
+    .toolbar button.warn,
+    .action-row button.warn {
+      background: linear-gradient(135deg, #a0442f, #c65d3b);
+      color: white;
+      box-shadow: 0 10px 20px rgba(198, 93, 59, 0.18);
+    }
+
+    .toolbar button:hover,
+    .action-row button:hover {
+      transform: translateY(-1px);
+    }
+
+    .chat {
+      display: grid;
+      gap: 12px;
+    }
+
+    .bubble {
+      border-radius: 22px;
+      padding: 16px;
+      border: 1px solid var(--line);
+      background: var(--panel-strong);
+    }
+
+    .bubble.system {
+      background: linear-gradient(180deg, rgba(15, 118, 110, 0.08), rgba(255, 250, 242, 0.98));
+    }
+
+    .bubble.prompt {
+      background: linear-gradient(180deg, rgba(198, 93, 59, 0.08), rgba(255, 250, 242, 0.98));
+    }
+
+    .bubble header {
+      margin-bottom: 8px;
+      font-size: 0.82rem;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--muted);
+      font-weight: 700;
+    }
+
+    .bubble pre {
+      margin: 0;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: var(--mono);
+      font-size: 0.91rem;
+      line-height: 1.55;
+    }
+
+    .status-grid {
+      display: grid;
+      gap: 10px;
+    }
+
+    .log-box {
+      border-radius: 18px;
+      background: #201d1a;
+      color: #f8f4ec;
+      padding: 14px;
+      min-height: 220px;
+      font-family: var(--mono);
+      font-size: 0.85rem;
+      line-height: 1.45;
+      white-space: pre-wrap;
+      overflow: auto;
+    }
+
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .metric-card small {
+      display: block;
+      margin-top: 6px;
+      color: var(--muted);
+    }
+
+    .mini {
+      font-size: 0.82rem;
+      color: var(--muted);
+    }
+
+    @media (max-width: 1160px) {
+      .layout {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 760px) {
+      .shell {
+        width: min(100vw, calc(100vw - 18px));
+        margin: 12px auto 28px;
+      }
+
+      .panel {
+        padding: 14px;
+      }
+
+      .row-two,
+      .row-three,
+      .metrics-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <section class="hero">
+      <div class="hero-copy">
+        <h1>Autoresearch Lab</h1>
+        <p>One local dashboard for prompting, launching, and checking experiments. It stays lightweight: suggested prompts, profile-aware run buttons, imported ToMX agent roles, and just enough live status to keep research loops disciplined.</p>
+      </div>
+      <div class="hero-badge">
+        <strong>Launch</strong>
+        <code>./autoresearch-dashboard</code>
+        <code id="serverAddress">Loading server address…</code>
+      </div>
+    </section>
+
+    <main class="layout">
+      <section class="panel stack">
+        <div>
+          <h2>Workspace Profiles</h2>
+          <div id="profiles" class="stack"></div>
+        </div>
+
+        <div>
+          <h2>Workspace Status</h2>
+          <div id="statusCards" class="status-grid"></div>
+        </div>
+
+        <div>
+          <h2>Action Bar</h2>
+          <div id="actionBar" class="stack"></div>
+        </div>
+      </section>
+
+      <section class="panel composer">
+        <div class="chat">
+          <div class="bubble system">
+            <header>Workspace Brief</header>
+            <div id="profileSummary" class="subtle">Loading profile summary…</div>
+          </div>
+
+          <div class="bubble">
+            <header>Suggested Prompts</header>
+            <div id="suggestions" class="stack"></div>
+          </div>
+
+          <div class="bubble prompt">
+            <header>Codex Full Prompt</header>
+            <pre id="promptPreview">Loading prompt…</pre>
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="agentSelect">Agent Lens</label>
+          <select id="agentSelect"></select>
+        </div>
+
+        <div class="field">
+          <label for="focusText">Goal / Hypothesis</label>
+          <textarea id="focusText"></textarea>
+        </div>
+
+        <div class="row-three">
+          <div class="field">
+            <label for="runLabel">Run Label</label>
+            <input id="runLabel" type="text">
+          </div>
+          <div class="field">
+            <label for="seedInput">Seed</label>
+            <input id="seedInput" type="number" min="1" step="1">
+          </div>
+          <div class="field">
+            <label for="branchTag">Branch Tag</label>
+            <input id="branchTag" type="text">
+          </div>
+        </div>
+
+        <div class="toolbar action-row">
+          <button id="copyPromptButton" class="primary" type="button">Copy Prompt</button>
+          <button id="refreshStatusButton" class="secondary" type="button">Refresh Status</button>
+          <button id="stopJobButton" class="warn" type="button">Stop Current Job</button>
+        </div>
+      </section>
+
+      <section class="panel stack">
+        <div>
+          <h2>Imported Agents</h2>
+          <div id="agentCards" class="stack"></div>
+        </div>
+
+        <div>
+          <h2>Doc Pack</h2>
+          <div id="docCards" class="stack"></div>
+        </div>
+
+        <div>
+          <h2>Live Job</h2>
+          <div id="jobSummary" class="response-card">
+            <strong>No active job</strong>
+            <div class="subtle">Start a run from the action bar to stream logs and get a lightweight summary.</div>
+          </div>
+        </div>
+
+        <div>
+          <h2>Latest Metrics</h2>
+          <div id="metricsGrid" class="metrics-grid"></div>
+        </div>
+
+        <div>
+          <h2>Runner Log</h2>
+          <div id="logTail" class="log-box">Waiting for output…</div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    const state = {
+      profiles: [],
+      selectedProfileId: null,
+      selectedAgentId: null,
+      selectedSuggestionId: null,
+      lastActionMessage: "",
+      currentJob: null,
+      statusByProfile: {},
+    };
+
+    const els = {
+      profiles: document.getElementById("profiles"),
+      profileSummary: document.getElementById("profileSummary"),
+      suggestions: document.getElementById("suggestions"),
+      promptPreview: document.getElementById("promptPreview"),
+      agentSelect: document.getElementById("agentSelect"),
+      focusText: document.getElementById("focusText"),
+      runLabel: document.getElementById("runLabel"),
+      seedInput: document.getElementById("seedInput"),
+      branchTag: document.getElementById("branchTag"),
+      agentCards: document.getElementById("agentCards"),
+      docCards: document.getElementById("docCards"),
+      statusCards: document.getElementById("statusCards"),
+      actionBar: document.getElementById("actionBar"),
+      copyPromptButton: document.getElementById("copyPromptButton"),
+      refreshStatusButton: document.getElementById("refreshStatusButton"),
+      stopJobButton: document.getElementById("stopJobButton"),
+      logTail: document.getElementById("logTail"),
+      jobSummary: document.getElementById("jobSummary"),
+      metricsGrid: document.getElementById("metricsGrid"),
+      serverAddress: document.getElementById("serverAddress"),
+    };
+
+    function slugify(text) {
+      return String(text || "")
+        .toLowerCase()
+        .trim()
+        .replace(/[^a-z0-9]+/g, "_")
+        .replace(/^_+|_+$/g, "")
+        .slice(0, 48) || "experiment";
+    }
+
+    function profileById(id) {
+      return state.profiles.find((profile) => profile.id === id);
+    }
+
+    function currentProfile() {
+      return profileById(state.selectedProfileId);
+    }
+
+    function currentAgent() {
+      const profile = currentProfile();
+      if (!profile) {
+        return null;
+      }
+      return profile.agents.find((agent) => agent.id === state.selectedAgentId) || null;
+    }
+
+    function currentSuggestion() {
+      const profile = currentProfile();
+      if (!profile) {
+        return null;
+      }
+      const suggestions = filteredSuggestions(profile);
+      return suggestions.find((item) => item.id === state.selectedSuggestionId) || suggestions[0] || null;
+    }
+
+    function filteredSuggestions(profile) {
+      if (!profile) {
+        return [];
+      }
+      const agent = profile.agents.find((item) => item.id === state.selectedAgentId);
+      if (agent && Array.isArray(agent.suggestions) && agent.suggestions.length) {
+        return agent.suggestions;
+      }
+      return profile.suggestions || [];
+    }
+
+    function fillDefaultsFromSuggestion(suggestion) {
+      const profile = currentProfile();
+      if (!profile || !suggestion) {
+        return;
+      }
+      els.focusText.value = suggestion.focus || "";
+      els.runLabel.value = suggestion.run_label || slugify(suggestion.focus || suggestion.title);
+      if (suggestion.seed) {
+        els.seedInput.value = suggestion.seed;
+      }
+      if (profile.branch_tag_hint) {
+        els.branchTag.value = profile.branch_tag_hint;
+      }
+    }
+
+    function applyProfileDefaults(profile) {
+      if (!profile) {
+        return;
+      }
+      state.selectedAgentId = profile.default_agent_id || (profile.agents[0] && profile.agents[0].id) || null;
+      const suggestions = filteredSuggestions(profile);
+      state.selectedSuggestionId = suggestions[0] ? suggestions[0].id : null;
+      els.seedInput.value = profile.default_seed || 7;
+      els.branchTag.value = profile.branch_tag_hint || "";
+      fillDefaultsFromSuggestion(currentSuggestion());
+    }
+
+    function buildPrompt() {
+      const profile = currentProfile();
+      if (!profile) {
+        return "";
+      }
+      const agent = currentAgent();
+      const focus = els.focusText.value.trim();
+      const runLabel = els.runLabel.value.trim() || slugify(focus);
+      const seed = els.seedInput.value.trim() || String(profile.default_seed || 7);
+      const branchTag = els.branchTag.value.trim() || "apr10";
+      const templates = profile.prompt_templates || {};
+      const template = templates[state.selectedAgentId] || templates.default || "";
+      return template
+        .replaceAll("{{focus}}", focus || "establish a clean baseline and propose the smallest justified next move")
+        .replaceAll("{{run_label}}", runLabel)
+        .replaceAll("{{seed}}", seed)
+        .replaceAll("{{branch_tag}}", branchTag)
+        .replaceAll("{{workspace}}", profile.workspace_path)
+        .replaceAll("{{task_path}}", profile.task_contract_path || "");
+    }
+
+    function renderProfiles() {
+      els.profiles.innerHTML = "";
+      state.profiles.forEach((profile) => {
+        const card = document.createElement("div");
+        card.className = `profile-card ${profile.id === state.selectedProfileId ? "active" : ""}`;
+        card.innerHTML = `
+          <button type="button">
+            <strong>${profile.title}</strong>
+            <div class="subtle">${profile.summary}</div>
+            <div class="mini" style="margin-top:10px">${profile.workspace_path}</div>
+          </button>
+        `;
+        card.querySelector("button").addEventListener("click", () => {
+          state.selectedProfileId = profile.id;
+          applyProfileDefaults(profile);
+          renderAll();
+          refreshStatus();
+        });
+        els.profiles.appendChild(card);
+      });
+    }
+
+    function renderAgentSelect() {
+      const profile = currentProfile();
+      els.agentSelect.innerHTML = "";
+      if (!profile) {
+        return;
+      }
+      profile.agents.forEach((agent) => {
+        const option = document.createElement("option");
+        option.value = agent.id;
+        option.textContent = `${agent.name} — ${agent.description}`;
+        if (agent.id === state.selectedAgentId) {
+          option.selected = true;
+        }
+        els.agentSelect.appendChild(option);
+      });
+    }
+
+    function renderAgentCards() {
+      const profile = currentProfile();
+      els.agentCards.innerHTML = "";
+      if (!profile) {
+        return;
+      }
+      profile.agents.forEach((agent) => {
+        const card = document.createElement("div");
+        card.className = `agent-card ${agent.id === state.selectedAgentId ? "active" : ""}`;
+        card.innerHTML = `
+          <button type="button">
+            <strong>${agent.name}</strong>
+            <div class="subtle">${agent.description}</div>
+            <div class="pill-row" style="margin-top:10px">
+              <span class="chip">${agent.model}</span>
+              <span class="chip warm">${agent.reasoning_effort}</span>
+            </div>
+            <div class="mini" style="margin-top:10px">${agent.source_path}</div>
+          </button>
+        `;
+        card.querySelector("button").addEventListener("click", () => {
+          state.selectedAgentId = agent.id;
+          renderAll();
+        });
+        els.agentCards.appendChild(card);
+      });
+    }
+
+    function renderSuggestions() {
+      const profile = currentProfile();
+      els.suggestions.innerHTML = "";
+      if (!profile) {
+        return;
+      }
+      filteredSuggestions(profile).forEach((suggestion) => {
+        const card = document.createElement("div");
+        card.className = `suggestion-card ${suggestion.id === state.selectedSuggestionId ? "active" : ""}`;
+        card.innerHTML = `
+          <button type="button">
+            <strong>${suggestion.title}</strong>
+            <div class="subtle">${suggestion.focus}</div>
+          </button>
+        `;
+        card.querySelector("button").addEventListener("click", () => {
+          state.selectedSuggestionId = suggestion.id;
+          fillDefaultsFromSuggestion(suggestion);
+          renderAll();
+        });
+        els.suggestions.appendChild(card);
+      });
+    }
+
+    function renderDocs() {
+      const profile = currentProfile();
+      els.docCards.innerHTML = "";
+      if (!profile) {
+        return;
+      }
+      profile.docs.forEach((doc) => {
+        const card = document.createElement("div");
+        card.className = "doc-card";
+        card.innerHTML = `
+          <strong>${doc.label}</strong>
+          <div class="subtle">${doc.note || ""}</div>
+          <div class="mini" style="margin-top:10px">${doc.path}</div>
+        `;
+        els.docCards.appendChild(card);
+      });
+    }
+
+    function renderProfileSummary() {
+      const profile = currentProfile();
+      if (!profile) {
+        els.profileSummary.textContent = "No profile selected.";
+        return;
+      }
+      const status = state.statusByProfile[profile.id];
+      const guardrails = profile.guardrails.map((rule) => `<span class="chip">${rule}</span>`).join("");
+      const statusLine = status
+        ? `<div class="mini" style="margin-top:10px">Branch: ${status.current_branch || "n/a"} · Dirty: ${String(status.worktree_dirty)} · Ready: ${String(status.ready || status.ready_for_training || false)}</div>`
+        : "";
+      els.profileSummary.innerHTML = `
+        <div>${profile.summary}</div>
+        <div class="pill-row" style="margin-top:12px">${guardrails}</div>
+        ${statusLine}
+      `;
+    }
+
+    function renderPrompt() {
+      els.promptPreview.textContent = buildPrompt();
+    }
+
+    function renderStatusCards() {
+      const profile = currentProfile();
+      els.statusCards.innerHTML = "";
+      if (!profile) {
+        return;
+      }
+      const status = state.statusByProfile[profile.id];
+      if (!status) {
+        els.statusCards.innerHTML = `<div class="response-card"><strong>Status not loaded</strong><div class="subtle">Use Refresh Status to pull the latest workspace checks.</div></div>`;
+        return;
+      }
+      const entries = Object.entries(status)
+        .filter(([key, value]) => typeof value !== "object" && value !== "")
+        .slice(0, 8);
+      entries.forEach(([key, value]) => {
+        const card = document.createElement("div");
+        card.className = "response-card";
+        card.innerHTML = `<strong>${key}</strong><div class="subtle">${String(value)}</div>`;
+        els.statusCards.appendChild(card);
+      });
+    }
+
+    function renderActions() {
+      const profile = currentProfile();
+      els.actionBar.innerHTML = "";
+      if (!profile) {
+        return;
+      }
+
+      const buttonDefs = profile.actions.map((action) => ({
+        ...action,
+        className: action.primary ? "primary" : (action.warn ? "warn" : "secondary"),
+      }));
+
+      buttonDefs.forEach((action) => {
+        const wrap = document.createElement("div");
+        wrap.className = "action-row";
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = action.className;
+        button.textContent = action.label;
+        button.addEventListener("click", () => triggerAction(action.id));
+        wrap.appendChild(button);
+
+        const note = document.createElement("div");
+        note.className = "mini";
+        note.textContent = action.note || "";
+        wrap.appendChild(note);
+        els.actionBar.appendChild(wrap);
+      });
+    }
+
+    function renderJob() {
+      const job = state.currentJob;
+      if (!job) {
+        els.jobSummary.innerHTML = `<strong>No active job</strong><div class="subtle">${state.lastActionMessage || "Run an action to stream output here."}</div>`;
+        els.logTail.textContent = "Waiting for output…";
+        els.metricsGrid.innerHTML = "";
+        return;
+      }
+
+      const title = `${job.profile_title} · ${job.action_label}`;
+      const statusLine = `${job.status}${job.finished_at ? ` · finished ${job.finished_at}` : ""}`;
+      els.jobSummary.innerHTML = `
+        <strong>${title}</strong>
+        <div class="subtle">${statusLine}</div>
+        <div class="mini" style="margin-top:10px">${job.cwd || ""}</div>
+      `;
+
+      els.logTail.textContent = (job.log_tail && job.log_tail.join("")) || "Job started. Waiting for output…";
+      els.metricsGrid.innerHTML = "";
+
+      const summary = job.summary || {};
+      const entries = Object.entries(summary);
+      if (!entries.length) {
+        return;
+      }
+      entries.slice(0, 6).forEach(([key, value]) => {
+        const card = document.createElement("div");
+        card.className = "metric-card";
+        card.innerHTML = `<strong>${key}</strong><small>${typeof value === "object" ? JSON.stringify(value) : String(value)}</small>`;
+        els.metricsGrid.appendChild(card);
+      });
+    }
+
+    function renderAll() {
+      renderProfiles();
+      renderAgentSelect();
+      renderAgentCards();
+      renderSuggestions();
+      renderDocs();
+      renderProfileSummary();
+      renderPrompt();
+      renderStatusCards();
+      renderActions();
+      renderJob();
+      els.serverAddress.textContent = window.location.href;
+    }
+
+    async function fetchJSON(path) {
+      const response = await fetch(path);
+      if (!response.ok) {
+        throw new Error(`Request failed: ${response.status}`);
+      }
+      return response.json();
+    }
+
+    async function postJSON(path, payload) {
+      const response = await fetch(path, {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(payload),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || `Request failed: ${response.status}`);
+      }
+      return data;
+    }
+
+    async function loadState() {
+      const payload = await fetchJSON("/api/state");
+      state.profiles = payload.profiles;
+      state.currentJob = payload.current_job;
+      state.statusByProfile = payload.status_by_profile || {};
+      if (!state.selectedProfileId && state.profiles[0]) {
+        state.selectedProfileId = payload.default_profile_id || state.profiles[0].id;
+        applyProfileDefaults(currentProfile());
+      }
+      renderAll();
+    }
+
+    async function refreshStatus() {
+      const profile = currentProfile();
+      if (!profile) {
+        return;
+      }
+      const payload = await postJSON("/api/action", {
+        profile_id: profile.id,
+        action_id: "refresh_status",
+        params: {},
+      });
+      state.statusByProfile[profile.id] = payload.status;
+      state.lastActionMessage = payload.message || "Status refreshed.";
+      renderAll();
+    }
+
+    async function triggerAction(actionId) {
+      const profile = currentProfile();
+      if (!profile) {
+        return;
+      }
+      try {
+        const payload = await postJSON("/api/action", {
+          profile_id: profile.id,
+          action_id: actionId,
+          params: {
+            focus: els.focusText.value.trim(),
+            run_label: els.runLabel.value.trim(),
+            seed: els.seedInput.value.trim(),
+            branch_tag: els.branchTag.value.trim(),
+          },
+        });
+        if (payload.status) {
+          state.statusByProfile[profile.id] = payload.status;
+        }
+        if (payload.job) {
+          state.currentJob = payload.job;
+        }
+        state.lastActionMessage = payload.message || "Action completed.";
+        renderAll();
+      } catch (error) {
+        state.lastActionMessage = error.message;
+        renderAll();
+      }
+    }
+
+    async function stopCurrentJob() {
+      try {
+        const payload = await postJSON("/api/action", {
+          profile_id: currentProfile() ? currentProfile().id : "",
+          action_id: "stop_job",
+          params: {},
+        });
+        state.currentJob = payload.job || null;
+        state.lastActionMessage = payload.message || "Stop signal sent.";
+        renderAll();
+      } catch (error) {
+        state.lastActionMessage = error.message;
+        renderAll();
+      }
+    }
+
+    async function pollJob() {
+      try {
+        const payload = await fetchJSON("/api/job");
+        state.currentJob = payload.current_job;
+        if (payload.status_by_profile) {
+          state.statusByProfile = {...state.statusByProfile, ...payload.status_by_profile};
+        }
+        renderJob();
+      } catch (error) {
+        state.lastActionMessage = error.message;
+      }
+    }
+
+    els.agentSelect.addEventListener("change", () => {
+      state.selectedAgentId = els.agentSelect.value;
+      const suggestion = currentSuggestion();
+      state.selectedSuggestionId = suggestion ? suggestion.id : null;
+      fillDefaultsFromSuggestion(currentSuggestion());
+      renderAll();
+    });
+    els.focusText.addEventListener("input", renderPrompt);
+    els.runLabel.addEventListener("input", renderPrompt);
+    els.seedInput.addEventListener("input", renderPrompt);
+    els.branchTag.addEventListener("input", renderPrompt);
+    els.copyPromptButton.addEventListener("click", async () => {
+      await navigator.clipboard.writeText(buildPrompt());
+      state.lastActionMessage = "Prompt copied to clipboard.";
+      renderAll();
+    });
+    els.refreshStatusButton.addEventListener("click", refreshStatus);
+    els.stopJobButton.addEventListener("click", stopCurrentJob);
+
+    loadState().then(refreshStatus).catch((error) => {
+      state.lastActionMessage = error.message;
+      renderAll();
+    });
+    setInterval(pollJob, 2000);
+  </script>
+</body>
+</html>

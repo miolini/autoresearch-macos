@@ -75,8 +75,22 @@ python .codex/skills/autoresearch-lab/scripts/autoresearch_ops.py append-result 
 
 6. Keep or revert the experiment based on the metric and simplicity tradeoff.
 
+## Local Dashboard
+
+For a thin app-style launcher instead of a shell-only workflow, start:
+
+```bash
+./autoresearch-dashboard
+```
+
+The dashboard exposes:
+
+- an `Autoresearch MacOS` profile for this repository
+- a `ToMX Local Quality` profile that reuses the external ToMX workspace and agent TOMLs
+- suggested prompts, profile-aware prompt composition, and lightweight run/status controls
+
 ## References
 
 - Read `references/protocol.md` for the detailed experiment policy, logging schema, and crash/timeout handling guidance.
+- The dashboard imports ToMX agent definitions from `/Users/stephenbeale/Projects/ToM_AI_Research_Team/.codex/agents/` instead of duplicating them locally.
 - `program.md` is still the legacy prompt surface, but prefer this skill plus the helper script for deterministic steps.
-

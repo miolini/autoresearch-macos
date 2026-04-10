@@ -1,0 +1,4 @@
+#!/bin/zsh
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+exec python "$SCRIPT_DIR/.codex/skills/autoresearch-lab/scripts/dashboard_server.py" "$@"
+
