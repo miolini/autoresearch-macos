@@ -18,3 +18,5 @@ AGENTS.md
 
 # Experimental code/artifacts
 dev/
+.omx/
+.codex/
