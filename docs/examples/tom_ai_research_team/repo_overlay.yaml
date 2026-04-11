@@ -1,0 +1,86 @@
+schema_version: "1.0"
+
+overlay_id: "tom_ai_research_team"
+overlay_name: "Tom AI Research Team benchmark overlay"
+status: "draft"   # draft | active | deprecated
+
+repo:
+  canonical_root:
+    value: "UNKNOWN"
+    status: "unknown"   # confirmed | assumed | unknown
+    notes: ""
+
+  benchmark_identity:
+    name: "UNKNOWN"
+    status: "unknown"
+    notes: ""
+
+  source_of_truth_statement: >
+    The benchmark repository is the source of truth for benchmark semantics,
+    metric definitions, and scientific results. The orchestration repository
+    must not silently redefine them.
+
+zones:
+  safe_editable:
+    - path: "UNKNOWN"
+      rationale: ""
+      status: "unknown"
+
+  sensitive_read_only:
+    - path: "UNKNOWN"
+      rationale: ""
+      status: "unknown"
+
+  prohibited_without_explicit_human_approval:
+    - path: "UNKNOWN"
+      rationale: ""
+      status: "unknown"
+
+benchmark_invariants:
+  files_or_areas_with_frozen_semantics:
+    - path: "env.py"
+      rationale: "Frozen benchmark semantics unless explicitly approved."
+      status: "assumed"
+    - path: "eval.py"
+      rationale: "Frozen evaluation semantics unless explicitly approved."
+      status: "assumed"
+
+  forbidden_changes:
+    - "Do not silently redefine metric semantics."
+    - "Do not silently change benchmark thresholds."
+    - "Do not treat orchestration policy as scientific truth."
+
+run_context:
+  incumbent_locations:
+    - path: "UNKNOWN"
+      purpose: "incumbent snapshots"
+      status: "unknown"
+
+  report_locations:
+    - path: "UNKNOWN"
+      purpose: "reports"
+      status: "unknown"
+
+  log_locations:
+    - path: "UNKNOWN"
+      purpose: "logs"
+      status: "unknown"
+
+  archive_locations:
+    - path: "UNKNOWN"
+      purpose: "archived evidence"
+      status: "unknown"
+
+validation:
+  smoke_commands:
+    - id: "smoke_main"
+      command: "TODO"
+      shell: "bash"
+      working_directory: "UNKNOWN"
+      expected_artifacts: []
+      status: "unknown"
+
+notes:
+  confirmed_facts: []
+  working_assumptions: []
+  open_questions: []

@@ -1,0 +1,239 @@
+repo_id: tom_ai_research_team
+
+display_name: ToM AI Research Team
+repo_root: /Users/stephenbeale/Projects/ToM_AI_Research_Team
+repo_root_aliases:
+  - /Users/stephenbeale/Projects/ToM AI Research Team
+
+description: >
+  Local-first Theory of Mind benchmark repo for ambiguity-heavy coordination
+  experiments. The scientific core lives in train.py, env.py, eval.py, and
+  scripts/select_candidate.py. The orchestration overlay exists to constrain
+  edits, preserve provenance, and standardize validation and promotion workflow.
+
+workflow:
+  mode: local_first
+  default_entrypoint: scripts/local_runner.py
+  default_shell_setup:
+    - cd "/Users/stephenbeale/Projects/ToM_AI_Research_Team"
+    - source .venv/bin/activate
+
+science_core:
+  critical_files:
+    - train.py
+    - env.py
+    - eval.py
+    - scripts/select_candidate.py
+  default_edit_surface:
+    - train.py
+  fixed_benchmark_semantics:
+    - env.py
+    - eval.py
+  protected_semantics:
+    - fixed_validation_scenarios()
+    - ToMCoordScore
+    - selection thresholds
+  comparability_break_rule: >
+    Any change that alters benchmark semantics, scenario definitions, metric
+    definitions, or selection thresholds must be documented explicitly as a
+    comparability break rather than described as a routine refactor.
+
+zones:
+  safe_change:
+    - docs/
+    - .github/
+    - notebooks/variant2_visuals.py
+    - webapp/frontend/
+    - report-generation scripts
+  sensitive_code:
+    - train.py
+    - env.py
+    - eval.py
+    - scripts/select_candidate.py
+  provenance_sensitive:
+    - logs/
+    - modal/
+    - archive/
+    - modal/tom-experiment-incumbent/
+  external_provenance_paths:
+    - /Users/stephenbeale/Projects/ToM experiment incumbent v3-omx
+    - /Users/stephenbeale/Projects/ToM experiment incumbent v4-postevidence-reengage
+    - /Users/stephenbeale/Projects/ToM experiment incumbent v5-delayedtrust-split-candidate
+    - /Users/stephenbeale/Projects/autoresearch-macos-tomx
+
+provenance:
+  forensic_timeline:
+    - /Users/stephenbeale/Projects/ToM_AI_Research_Team/PROVENANCE_FORENSIC_TIMELINE_2026-04-09.md
+  lineage_anchor:
+    - /Users/stephenbeale/Projects/ToM_AI_Research_Team/modal/tom-experiment-incumbent/train.py
+  notes:
+    - >
+      Treat archived incumbents, logs, Modal outputs, and report packs as
+      evidence stores, not generic disposable output folders.
+    - >
+      Modal runs were used primarily to check runner consistency, including
+      aux-lite behavior, rather than to redefine the local-first workflow.
+    - >
+      Do not casually overwrite prior output roots or rewrite archived incumbent
+      contents.
+    - >
+      Claims about lineage should be framed as confirmed only if supported by
+      direct file comparison, diff, or hash evidence.
+
+editing_policy:
+  bounded_change_default: true
+  one_hypothesis_at_a_time: true
+  preferred_patch_scope: train.py_only
+  do_not_change_without_explicit_benchmark_revision:
+    - fixed_validation_scenarios()
+    - ToMCoordScore formula
+    - metric definitions
+    - selection thresholds
+    - action semantics in env.py
+    - frozen scenario suite in env.py/eval.py
+  documentation_rule: >
+    Separate confirmed facts from inference in all docs, reviews, and promotion
+    notes.
+
+validation:
+  smoke:
+    description: Minimum required validation after code edits
+    command: python scripts/local_runner.py --train-episodes 5 --seed 7 --output-root logs/local-smoke-validation
+    required_artifacts:
+      - baseline/metrics.json
+      - candidate/metrics.json
+      - selection/selection.json
+      - selected_model/model.pt
+  serving_checks:
+    required_if_serving_changed: true
+    checks:
+      - /health
+      - one /predict request
+  notes:
+    - Smoke is compatibility validation, not scientific validation.
+    - Promotion decisions should not be made from smoke runs alone.
+
+evaluation_policy:
+  benchmark_standard:
+    train_episodes: 800
+  quick_gate:
+    seeds: [7, 11, 17]
+    train_episodes: 800
+    intended_use: deciding whether a train.py tweak is worth keeping
+    pass_rule:
+      - mean DeadlockRate is not worse
+      - mean ToMCoordScore is higher
+      - no seed has DeadlockRate worse than baseline by more than 0.10
+  promotion_gate:
+    seeds: [7, 11, 17, 23, 29]
+    train_episodes: 800
+    intended_use: incumbent promotion decision
+    pass_rule:
+      - mean DeadlockRate is not worse
+      - mean ToMCoordScore is higher
+      - mean CollisionRate is lower or equal
+      - mean SuccessRate is higher or equal
+      - no catastrophic single-seed regression
+    catastrophic_regression_guardrails:
+      - DeadlockRate delta must not exceed +0.10 on any seed
+      - ToMCoordScore drop must not be below -0.05 on any seed
+  confidence_gate:
+    optional: true
+    seeds: [7, 11, 17, 23, 29, 31, 37]
+    train_episodes: 800
+    intended_use: high-confidence confirmation only
+
+metrics:
+  headline_metric: ToMCoordScore
+  supporting_metrics:
+    - IntentionPredictionF1
+    - StrategySwitchAccuracy
+    - AmbiguityEfficiency
+    - SuccessRate
+    - CollisionRate
+    - DeadlockRate
+    - AverageDelay
+  interpretation_notes:
+    - IntentionPredictionF1 is diagnostic, not sufficient on its own.
+    - Prefer gains that improve coordination without buying safety through passivity.
+    - Deadlock flat or lower is a hard practical constraint.
+
+naming:
+  output_root_pattern: logs/{experiment_label}_seed{seed}
+  experiment_header_fields:
+    - experiment_name
+    - scope
+    - benchmark
+    - scientific_gate
+    - quick_gate_seeds
+    - promotion_gate_seeds
+  incumbent_snapshot_fields:
+    - train.py
+    - selection.json
+    - optional summary note
+  suggested_labels:
+    - v3omx_postevidence_reengage
+    - delayed_trust_split
+    - false_friend_branch_confusion
+
+commands:
+  smoke_example:
+    - python scripts/local_runner.py --train-episodes 5 --seed 7 --output-root logs/pre_omx_smoke
+  quick_gate_examples:
+    - python scripts/local_runner.py --train-episodes 800 --seed 7 --output-root logs/v3omx_postevidence_reengage_seed7
+    - python scripts/local_runner.py --train-episodes 800 --seed 11 --output-root logs/v3omx_postevidence_reengage_seed11
+    - python scripts/local_runner.py --train-episodes 800 --seed 17 --output-root logs/v3omx_postevidence_reengage_seed17
+  promotion_gate_pattern:
+    - python scripts/local_runner.py --train-episodes 800 --seed <SEED> --output-root logs/<EXPERIMENT_LABEL>_seed<SEED>
+
+research_posture:
+  confirmed_vs_inferred_required: true
+  weak_seed_policy: >
+    Weak or unfavorable seeds may be used as diagnostic probes to expose brittle
+    strategies and overfitting, but promotion should still be decided using the
+    declared multi-seed gate.
+  interpretation_style:
+    - prefer mechanism-focused summaries over hype
+    - do not overclaim artificial mindreading
+    - frame results as belief-guided coordination under uncertainty
+
+artifacts:
+  expected_selection_file: selection/selection.json
+  expected_model_file: selected_model/model.pt
+  expected_metrics_files:
+    - baseline/metrics.json
+    - candidate/metrics.json
+  report_preference:
+    - prefer in-project report packs before reconstructing comparisons from raw files
+
+status_notes:
+  active_benchmark: Variant 1 Ambiguous Bottleneck Negotiation
+  future_variant_note: >
+    Variant 2 exists as a benchmark concept for context-sensitive right-of-way
+    negotiation, but Variant 1 remains the active frozen benchmark for current
+    quality passes.
+  current_method_summary: >
+    One narrow train.py change at a time; smoke for breakage only; 800-episode
+    seed-gated runs for scientific judgment; snapshot promising incumbents
+    separately; preserve provenance.
+What should be reusable vs repo-specific
+
+Reusable
+	•	agent roles
+	•	run-state machine
+	•	promotion gate logic
+	•	summary/report templates
+	•	backend interfaces
+	•	artifact expectations
+	•	provenance guardrails
+
+Repo-specific
+	•	canonical repo root
+	•	exact command templates
+	•	sensitive files and do-not-touch zones
+	•	benchmark semantics warnings
+	•	seed policy if benchmark-specific
+	•	incumbent paths
+	•	report field names tied to your repo
+
+That distinction matters because your benchmark has unusually strong constraints: env.py and eval.py are fixed, the editable surface is narrow, and the project is trying to avoid semantic drift during quality passes.
