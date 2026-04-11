@@ -384,7 +384,7 @@ It is a practical orchestration layer for structured human-plus-LLM research wor
 
 ⸻
 
-#About # autoresearch-macos
+# About autoresearch-macos
 
 ## Local path note
 
