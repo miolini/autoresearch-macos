@@ -1,0 +1,52 @@
+schema_version: "1.0"
+
+seed_policies:
+  quick_gate:
+    description: "Fast early gate for bounded validation before wider promotion testing."
+    seed_count:
+      value: 3
+      status: "confirmed"
+    seeds:
+      - "7"
+      - "11"
+      - "17"
+    ordering_rule: "Run in listed order."
+    pass_to_next_stage_if: "Mean DeadlockRate is not worse, mean ToMCoordScore is higher, and no seed has DeadlockRate worse than baseline by more than 0.10."
+    notes:
+      - "Current working method uses 800 episodes per seed for scientific gates."
+
+  promotion_gate:
+    description: "Wider gate used before promotion or incumbent challenge decisions."
+    seed_count:
+      value: 5
+      status: "confirmed"
+    seeds:
+      - "7"
+      - "11"
+      - "17"
+      - "23"
+      - "29"
+    ordering_rule: "Run in listed order."
+    pass_to_next_stage_if: "Mean DeadlockRate is not worse, mean ToMCoordScore is higher, mean CollisionRate is lower or equal, mean SuccessRate is higher or equal, and no catastrophic single-seed regression is present."
+    notes:
+      - "Catastrophic regression guardrails currently use DeadlockRate delta > +0.10 and ToMCoordScore drop < -0.05 as block conditions."
+
+escalation:
+  from_stage: "quick_gate"
+  to_stage: "promotion_gate"
+  trigger_condition: "Smoke validation passed, all quick-gate seeds completed, required artifacts are present, and the quick-gate pass rule is satisfied."
+  forbid_escalation_if:
+    - "Smoke validation failed."
+    - "Required artifacts missing."
+    - "Patch scope is unclear."
+  notes:
+    - "Promotion-gate runs are reserved for changes that still look incumbent-worthy after the 3-seed gate."
+
+notes:
+  confirmed_facts:
+    - "Quick-gate seed set is 7, 11, 17."
+    - "Promotion-gate seed set is 7, 11, 17, 23, 29."
+    - "Scientific gates currently use 800 episodes per seed."
+  working_assumptions:
+    - "Running seeds in listed order is current convention rather than a benchmark-semantic requirement."
+  open_questions: []

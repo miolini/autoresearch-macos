@@ -1,0 +1,76 @@
+schema_version: "1.0"
+
+provenance_policy:
+  required_run_metadata:
+    - field: "run_id"
+      required: true
+      description: "Unique identifier for the run."
+    - field: "timestamp_utc"
+      required: true
+      description: "UTC timestamp for run start or record creation."
+    - field: "operator"
+      required: true
+      description: "Human or agent responsible for the run."
+    - field: "repo_root"
+      required: true
+      description: "Canonical benchmark repo root used for the run."
+    - field: "git_commit"
+      required: false
+      description: "Benchmark repo commit or equivalent version identifier."
+    - field: "patch_identifier"
+      required: true
+      description: "Identifier linking run to the specific patch or patch family."
+    - field: "hypothesis_identifier"
+      required: true
+      description: "Identifier linking run to the bounded hypothesis under test."
+    - field: "stage"
+      required: true
+      description: "smoke | quick_gate | promotion_gate | other"
+    - field: "seed"
+      required: false
+      description: "Seed identifier for per-seed runs."
+    - field: "command"
+      required: true
+      description: "Exact executed command."
+    - field: "working_directory"
+      required: true
+      description: "Directory from which the command was run."
+
+  linkage_rules:
+    - rule_id: "patch_to_hypothesis"
+      rule: "Every patch identifier must map to one bounded hypothesis."
+    - rule_id: "run_to_patch"
+      rule: "Every run record must identify the patch under test."
+    - rule_id: "run_to_artifacts"
+      rule: "Every required artifact should be attributable to a run_id."
+    - rule_id: "seed_to_run"
+      rule: "Per-seed outputs must record the seed used."
+
+  evidence_interpretation:
+    require_confirmed_vs_inferred_split: true
+    require_uncertainty_notes: true
+    rules:
+      - "Separate artifact-observed facts from interpretation."
+      - "Mark unresolved issues explicitly."
+      - "Do not present inference as confirmed result."
+      - "When a weakness or hypothesis is identified, record both a short human-readable label and a more detailed mechanism description."
+
+  retention_rules:
+    preserve_run_records: true
+    preserve_primary_artifacts: true
+    preserve_stage_summaries: true
+    preserve_failed_run_evidence: true
+    notes:
+      - "Failed smoke, quick-gate, and promotion-gate runs remain part of the evidence trail."
+      - "Promotion-relevant runs should use fresh output roots rather than overwriting earlier evidence."
+
+notes:
+  confirmed_facts:
+    - "Current method requires explicit seed provenance for per-seed runs."
+    - "Failed run evidence must be preserved rather than silently discarded."
+    - "Evidence interpretation must separate confirmed facts from inference."
+    - "Current issue-note practice pairs a short failure-family label with a more detailed mechanism description."
+  working_assumptions:
+    - "patch_identifier and hypothesis_identifier may be branch names, ticket ids, or other stable tokens until a stricter manifest format is adopted."
+  open_questions:
+    - "Should git_commit become required for promotion-gate decisions when the benchmark repo worktree is clean?"

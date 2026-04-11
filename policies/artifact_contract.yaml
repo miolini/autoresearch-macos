@@ -1,0 +1,145 @@
+schema_version: "1.0"
+
+artifact_contract:
+  required_after_smoke:
+    - artifact_id: "smoke_baseline_stdout"
+      kind: "log"
+      path_glob: "logs/*/baseline_metrics/stdout.log"
+      required: true
+      evidence_class: "primary"
+      validation_rule: "Must exist and be non-empty for the smoke output root."
+    - artifact_id: "smoke_candidate_stdout"
+      kind: "log"
+      path_glob: "logs/*/candidate_metrics/stdout.log"
+      required: true
+      evidence_class: "primary"
+      validation_rule: "Must exist and be non-empty for the smoke output root."
+    - artifact_id: "smoke_baseline_metrics"
+      kind: "report"
+      path_glob: "logs/*/baseline_metrics/metrics.json"
+      required: true
+      evidence_class: "primary"
+      validation_rule: "Must exist and parse as JSON."
+    - artifact_id: "smoke_candidate_metrics"
+      kind: "report"
+      path_glob: "logs/*/candidate_metrics/metrics.json"
+      required: true
+      evidence_class: "primary"
+      validation_rule: "Must exist and parse as JSON."
+    - artifact_id: "smoke_selection_summary"
+      kind: "summary"
+      path_glob: "logs/*/selection/selection.json"
+      required: true
+      evidence_class: "primary"
+      validation_rule: "Must exist and capture decision, selected_variant, and compared metrics."
+    - artifact_id: "smoke_selected_model"
+      kind: "snapshot"
+      path_glob: "logs/*/selected_model/model.pt"
+      required: true
+      evidence_class: "primary"
+      validation_rule: "Must exist as the packaged selected model."
+
+  required_after_quick_gate:
+    - artifact_id: "quick_gate_per_seed_logs"
+      kind: "log"
+      path_glob: "logs/*_seed*/baseline_metrics/stdout.log"
+      required: true
+      evidence_class: "primary"
+      validation_rule: "One non-empty baseline stdout log per required quick-gate seed."
+    - artifact_id: "quick_gate_per_seed_candidate_logs"
+      kind: "log"
+      path_glob: "logs/*_seed*/candidate_metrics/stdout.log"
+      required: true
+      evidence_class: "primary"
+      validation_rule: "One non-empty candidate stdout log per required quick-gate seed."
+    - artifact_id: "quick_gate_per_seed_selection"
+      kind: "summary"
+      path_glob: "logs/*_seed*/selection/selection.json"
+      required: true
+      evidence_class: "primary"
+      validation_rule: "One per required quick-gate seed."
+    - artifact_id: "quick_gate_summary"
+      kind: "summary"
+      path_glob: "logs/*_quick_gate_summary.md"
+      required: true
+      evidence_class: "primary"
+      validation_rule: "Must summarize the declared quick-gate seed set, per-seed outcomes, aggregate means, and the keep/discard recommendation."
+
+  required_after_promotion_gate:
+    - artifact_id: "promotion_gate_per_seed_logs"
+      kind: "log"
+      path_glob: "logs/*_seed*/baseline_metrics/stdout.log"
+      required: true
+      evidence_class: "primary"
+      validation_rule: "One non-empty baseline stdout log per required promotion-gate seed."
+    - artifact_id: "promotion_gate_per_seed_candidate_logs"
+      kind: "log"
+      path_glob: "logs/*_seed*/candidate_metrics/stdout.log"
+      required: true
+      evidence_class: "primary"
+      validation_rule: "One non-empty candidate stdout log per required promotion-gate seed."
+    - artifact_id: "promotion_gate_per_seed_selection"
+      kind: "summary"
+      path_glob: "logs/*_seed*/selection/selection.json"
+      required: true
+      evidence_class: "primary"
+      validation_rule: "One per required promotion-gate seed."
+    - artifact_id: "promotion_gate_aggregate_summary"
+      kind: "summary"
+      path_glob: "logs/*_promotion_gate_summary.md"
+      required: true
+      evidence_class: "primary"
+      validation_rule: "Must summarize aggregate and per-seed promotion outcomes using the declared reusable gate policy."
+    - artifact_id: "branch_specific_results_table"
+      kind: "summary"
+      path_glob: "/Users/stephenbeale/Projects/ToM experiment incumbent */RESULTS_TABLE.md"
+      required: false
+      evidence_class: "supporting"
+      validation_rule: "Optional branch-specific evidence convention with per-seed rows and aggregate means."
+    - artifact_id: "branch_specific_note"
+      kind: "comparison"
+      path_glob: "/Users/stephenbeale/Projects/ToM experiment incumbent */INCUMBENT*_NOTE.md"
+      required: false
+      evidence_class: "supporting"
+      validation_rule: "Optional branch-specific evidence convention for narrative promotion or incumbent notes."
+
+artifact_bundle_rules:
+  minimally_valid_smoke_bundle:
+    required_artifact_ids:
+      - "smoke_baseline_stdout"
+      - "smoke_candidate_stdout"
+      - "smoke_baseline_metrics"
+      - "smoke_candidate_metrics"
+      - "smoke_selection_summary"
+      - "smoke_selected_model"
+
+  minimally_valid_quick_gate_bundle:
+    required_artifact_ids:
+      - "quick_gate_per_seed_logs"
+      - "quick_gate_per_seed_candidate_logs"
+      - "quick_gate_per_seed_selection"
+      - "quick_gate_summary"
+
+  minimally_valid_promotion_bundle:
+    required_artifact_ids:
+      - "promotion_gate_per_seed_logs"
+      - "promotion_gate_per_seed_candidate_logs"
+      - "promotion_gate_per_seed_selection"
+      - "promotion_gate_aggregate_summary"
+
+retention:
+  preserve_primary_evidence: true
+  preserve_supporting_evidence: true
+  allow_disposable_outputs: false
+  notes:
+    - "Evidence-bearing artifacts must not be treated as disposable."
+
+notes:
+  confirmed_facts:
+    - "scripts/local_runner.py packages baseline_metrics/, candidate_metrics/, selected_model/, and selection/ under each output root."
+    - "Smoke validation automatically emits per-variant stdout logs and metrics.json files."
+    - "selection/selection.json is the primary packaged decision artifact."
+    - "Reusable gate policy is the authoritative measurement workflow."
+  working_assumptions:
+    - "RESULTS_TABLE.md and INCUMBENT*_NOTE.md remain optional branch-specific evidence conventions rather than mandatory promotion artifacts."
+  open_questions: []

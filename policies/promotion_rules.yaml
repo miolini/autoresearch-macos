@@ -1,0 +1,77 @@
+schema_version: "1.0"
+
+promotion_policy:
+  preconditions:
+    smoke_validation_required: true
+    required_precondition_checks:
+      - check_id: "smoke_pass"
+        rule: "Smoke validation command completed successfully."
+        status: "active"
+      - check_id: "artifact_bundle_present"
+        rule: "Required stage artifacts exist."
+        status: "active"
+      - check_id: "bounded_train_py_scope"
+        rule: "Current working mode remains a bounded train.py-only change against the frozen Variant 1 benchmark."
+        status: "active"
+
+  quick_gate:
+    enabled: true
+    stage_name: "quick_gate"
+    success_criteria:
+      - criterion_id: "quick_gate_defined_seed_set_completed"
+        rule: "All required quick-gate seeds completed."
+      - criterion_id: "quick_gate_artifacts_present"
+        rule: "All required quick-gate artifacts are present."
+      - criterion_id: "quick_gate_promotion_condition"
+        rule: "Mean DeadlockRate is not worse, mean ToMCoordScore is higher, and no seed has DeadlockRate worse than baseline by more than 0.10."
+    disqualifying_failures:
+      - "Any required quick-gate seed missing."
+      - "Any required quick-gate artifact missing."
+      - "Any seed has DeadlockRate delta greater than +0.10."
+      - "Semantic drift detected."
+      - "Patch scope exceeds bounded change expectations."
+
+  promotion_gate:
+    enabled: true
+    stage_name: "promotion_gate"
+    success_criteria:
+      - criterion_id: "promotion_gate_defined_seed_set_completed"
+        rule: "All required promotion-gate seeds completed."
+      - criterion_id: "promotion_gate_artifacts_present"
+        rule: "All required promotion-gate artifacts are present."
+      - criterion_id: "promotion_gate_decision_condition"
+        rule: "Mean DeadlockRate is not worse, mean ToMCoordScore is higher, mean CollisionRate is lower or equal, mean SuccessRate is higher or equal, and no seed has DeadlockRate delta greater than +0.10 or ToMCoordScore drop below -0.05."
+    disqualifying_failures:
+      - "Any required promotion-gate seed missing."
+      - "Any required promotion-gate artifact missing."
+      - "Any seed has DeadlockRate delta greater than +0.10."
+      - "Any seed has ToMCoordScore drop below -0.05."
+      - "Semantic drift detected."
+      - "Provenance incomplete."
+
+decision_outputs:
+  allowed_decisions:
+    - "reject"
+    - "hold"
+    - "promote_candidate"
+    - "needs_human_review"
+
+  decision_requirements:
+    reject:
+      minimum_evidence: "Stage evidence sufficient to show failure or non-promotion."
+    hold:
+      minimum_evidence: "Stage evidence present but insufficient for promotion."
+    promote_candidate:
+      minimum_evidence: "Promotion-gate evidence complete, required reusable-gate artifacts are present, and policy conditions are satisfied."
+    needs_human_review:
+      minimum_evidence: "Conflicting, ambiguous, or incomplete evidence requiring review."
+
+notes:
+  confirmed_facts:
+    - "Smoke validation is required before wider seed-gated evaluation."
+    - "Quick gate is the 3-seed direction check before promotion-gate work."
+    - "Current working benchmark mode is train.py-only local quality mode for frozen Variant 1."
+    - "Promotion decisions currently allow reject, hold, promote_candidate, or needs_human_review."
+  working_assumptions:
+    - "Branch-specific study or incumbent-note conventions may accompany decisions, but they do not replace reusable gate-policy evidence."
+  open_questions: []

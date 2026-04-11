@@ -1,0 +1,139 @@
+schema_version: "1.0"
+
+overlay_id: "tom_ai_research_team"
+overlay_name: "Tom AI Research Team benchmark overlay"
+status: "draft"
+
+repo:
+  canonical_root:
+    value: "/Users/stephenbeale/Projects/ToM_AI_Research_Team"
+    status: "confirmed"
+    notes: "Use this as the only benchmark repo root; the similarly named path with spaces is a non-canonical alias."
+
+  benchmark_identity:
+    name: "ToM_AI_Research_Team"
+    status: "confirmed"
+    notes: "Current working method is train.py-only local quality mode for frozen Variant 1 ambiguous bottleneck."
+
+  source_of_truth_statement: >
+    The benchmark repository is the source of truth for benchmark semantics,
+    metric definitions, and scientific results. The orchestration repository
+    must not silently redefine them.
+
+zones:
+  safe_editable:
+    - path: "train.py"
+      rationale: "Current working mode explicitly limits benchmark edits to train.py-only bounded hypothesis changes."
+      status: "confirmed"
+
+  sensitive_read_only:
+    - path: "scripts/select_candidate.py"
+      rationale: "Selection logic participates in scientific decision policy and comparability."
+      status: "confirmed"
+    - path: "logs/"
+      rationale: "Local verification outputs are evidence-bearing artifacts and should not be treated as disposable."
+      status: "confirmed"
+    - path: "modal/"
+      rationale: "Long-run outputs and incumbent archives are provenance-sensitive evidence stores."
+      status: "confirmed"
+    - path: "archive/"
+      rationale: "Archive paths are documented as evidence-bearing and should not be casually rewritten."
+      status: "assumed"
+
+  prohibited_without_explicit_human_approval:
+    - path: "env.py"
+      rationale: "Frozen benchmark semantics unless an explicit benchmark revision is approved."
+      status: "confirmed"
+    - path: "eval.py"
+      rationale: "Frozen evaluation semantics unless an explicit benchmark revision is approved."
+      status: "confirmed"
+    - path: "scripts/local_runner.py"
+      rationale: "Current mode forbids runner edits so the benchmark harness and packaged artifact contract stay stable."
+      status: "confirmed"
+
+benchmark_invariants:
+  files_or_areas_with_frozen_semantics:
+    - path: "env.py"
+      rationale: "Frozen benchmark semantics unless explicitly approved."
+      status: "confirmed"
+    - path: "eval.py"
+      rationale: "Frozen evaluation semantics unless explicitly approved."
+      status: "confirmed"
+
+  forbidden_changes:
+    - "Do not silently redefine metric semantics."
+    - "Do not silently change benchmark thresholds."
+    - "Do not silently change selection thresholds."
+    - "Do not treat orchestration policy as scientific truth."
+
+run_context:
+  incumbent_locations:
+    - path: "modal/tom-experiment-incumbent"
+      purpose: "internal incumbent archive and warm-start checkpoints"
+      status: "confirmed"
+    - path: "/Users/stephenbeale/Projects/ToM experiment incumbent"
+      purpose: "external incumbent snapshots"
+      status: "confirmed"
+    - path: "/Users/stephenbeale/Projects/ToM experiment incumbent v3-omx"
+      purpose: "external incumbent snapshots"
+      status: "confirmed"
+    - path: "/Users/stephenbeale/Projects/ToM experiment incumbent v4-postevidence-reengage"
+      purpose: "external incumbent snapshots"
+      status: "confirmed"
+    - path: "/Users/stephenbeale/Projects/ToM experiment incumbent v5-delayedtrust-split-candidate"
+      purpose: "external incumbent snapshots"
+      status: "confirmed"
+
+  report_locations:
+    - path: "/Users/stephenbeale/Projects/autoresearch-macos-tomx/studies/"
+      purpose: "optional branch-specific study notes and mini-benchmark specs"
+      status: "confirmed"
+    - path: "/Users/stephenbeale/Projects/ToM experiment incumbent v4-postevidence-reengage/RESULTS_TABLE.md"
+      purpose: "optional branch-specific promotion evidence convention"
+      status: "confirmed"
+    - path: "/Users/stephenbeale/Projects/ToM experiment incumbent v5-delayedtrust-split-candidate/RESULTS_TABLE.md"
+      purpose: "optional branch-specific promotion evidence convention"
+      status: "confirmed"
+
+  log_locations:
+    - path: "logs/"
+      purpose: "local smoke, quick-gate, and promotion-gate outputs"
+      status: "confirmed"
+    - path: "modal/"
+      purpose: "Modal run outputs and run summaries"
+      status: "confirmed"
+
+  archive_locations:
+    - path: "modal/tom-experiment-incumbent"
+      purpose: "archived incumbent evidence"
+      status: "confirmed"
+    - path: "archive/"
+      purpose: "archived evidence when present"
+      status: "assumed"
+
+validation:
+  smoke_commands:
+    - id: "smoke_main"
+      command: "python scripts/local_runner.py --train-episodes 5 --seed 7 --output-root logs/local-smoke-validation"
+      shell: "bash"
+      working_directory: "/Users/stephenbeale/Projects/ToM_AI_Research_Team"
+      expected_artifacts:
+        - "baseline_metrics/metrics.json"
+        - "candidate_metrics/metrics.json"
+        - "selection/selection.json"
+        - "selected_model/model.pt"
+      status: "confirmed"
+
+notes:
+  confirmed_facts:
+    - "Canonical benchmark repo root is /Users/stephenbeale/Projects/ToM_AI_Research_Team."
+    - "Current smoke validation runs through scripts/local_runner.py from the benchmark repo root."
+    - "Current working benchmark method is train.py-only local quality mode."
+    - "env.py and eval.py remain frozen benchmark semantic surfaces."
+    - "scripts/local_runner.py is part of the frozen benchmark harness in the current mode."
+    - "logs/, modal/, and incumbent archives are evidence-bearing."
+    - "Reusable gate policy is the consistent standard for measurement and workflow publication."
+  working_assumptions:
+    - "Study docs and incumbent notes/results tables are optional branch-specific evidence conventions, not the authoritative gate policy."
+  open_questions:
+    - "Should archive/ remain a declared protected zone if the benchmark repo does not materialize it on every branch?"
