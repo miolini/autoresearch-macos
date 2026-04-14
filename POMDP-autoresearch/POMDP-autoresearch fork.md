@@ -1,12 +1,15 @@
-# POMDP Autoresearch Guide
+POMDPs Autoresearch Guide
 
-Chades et al. (2020), "A primer on partially observable Markov decision processes (POMDPs)," DOI: 10.1111/2041-210X.13692.
+## This section references:
 
-Karpathy's autoresearch is best used here as a research loop template, not as a drop-in POMDP solver.
+Chades, I., Pascal, L. V., Nicol, S., Fletcher, C. S., & Ferrer‐Mestres, J. (2021). A primer on partially observable Markov decision processes (POMDPs). Methods in Ecology and Evolution, 12(11), 2058–2072. 
+DOI: 10.1111/2041-210X.13692.
+
+## Karpathy's autoresearch is used here as a research loop template, not as a drop-in POMDP solver.
 
 Autoresearch is a strong fit for POMDP engineering loops: solver tuning, benchmarking, code optimization, compact policy search, and interpretability tooling. The primer highlights repetitive, high-dimensional design choices under expensive evaluation, where constrained autonomous experimentation is useful.
 
-AR's core pattern is:
+## AR's core pattern is:
 
 - Let an agent edit a constrained code surface.
 - Run a fixed-budget experiment.
@@ -14,27 +17,29 @@ AR's core pattern is:
 - Keep or discard the change.
 - Repeat.
 
-In this repo style:
+## In this repo style:
 
 - The agent edits one file.
 - It runs a fixed-time experiment.
 - It compares outcomes under a stable metric.
 - Instructions live in program.md.
 
-That maps well onto the bottlenecks in the POMDP primer.
+That maps well onto the bottlenecks noted by Chades et al. (2021).
 
-POMDPs are hard because:
+## POMDPs are hard because:
 
 - Partial observability forces reasoning over belief states.
 - Full history is too large to store explicitly.
 - Belief space is continuous.
 - Exact dynamic programming does not scale.
 
-The primer also notes that exact, approximate, and heuristic solvers all matter, but applied users often care about interpretation and explanation in addition to raw performance.
+Studies show that exact, approximate, and heuristic solvers all matter, but applied users often care about interpretation and explanation in addition to raw performance.
 
-## 1. Optimize POMDP-Adjacent Code
+# Application of Autoresearch for POMDPS
 
-Use the "single editable file + fixed evaluation budget" pattern for:
+## 1. Optimization of POMDP-Adjacent Code
+
+Autoresearch "single editable file + fixed evaluation budget" pattern used for:
 
 - Belief update kernels.
 - Backup operators.
@@ -43,11 +48,11 @@ Use the "single editable file + fixed evaluation budget" pattern for:
 - Policy graph post-processing.
 - Factored and MOMDP data structures.
 
-The paper frames solving POMDPs as computationally formidable. Approximate methods dominate because enumerating all reachable beliefs is infeasible. A loop that proposes code changes and benchmarks them under fixed seeds and fixed wall-clock budgets is well matched to this setting.
+The study frames solving POMDPs as computationally formidable. Approximate methods dominate because enumerating all reachable beliefs is infeasible. A loop that proposes code changes and benchmarks them under fixed seeds and fixed wall-clock budgets is well matched to this setting.
 
 ## 2. Tune Approximate Solvers
 
-The primer discusses grid methods, point-based methods, Perseus, Symbolic Perseus, and APPL/SARSOP. Point-based methods help because they optimize over reachable belief points instead of wasting effort on beliefs policy execution never visits.
+The study discusses grid methods, point-based methods, Perseus, Symbolic Perseus, and APPL/SARSOP. Point-based methods help because they optimize over reachable belief points instead of wasting effort on beliefs policy execution never visits.
 
 An autoresearch loop can search over:
 
@@ -97,7 +102,7 @@ A useful benchmark table should report return, runtime, alpha-vector count, and 
 
 ## 5. Search for Compact Policy Representations
 
-The primer says POMDP solutions are often hard to visualize and interpret. Policy graphs can reach thousands of nodes, and alpha-vector count is a practical indicator of interpretability difficulty. It also shows some policies can be simplified into compact, human-readable rules.
+The study says POMDP solutions are often hard to visualize and interpret. Policy graphs can reach thousands of nodes, and alpha-vector count is a practical indicator of interpretability difficulty. It also shows some policies can be simplified into compact, human-readable rules.
 
 An autonomous loop can optimize not only return, but also:
 
