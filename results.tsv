@@ -1,0 +1,3 @@
+commit	val_bpb	memory_gb	status	description
+537c6e6	1.834839	0.0	keep	baseline
+35e3dec	1.731247	0.0	keep	reduce WARMDOWN_RATIO to 0.25
