@@ -480,25 +480,25 @@ class MuonAdamW(torch.optim.Optimizer):
 # ---------------------------------------------------------------------------
 
 # Model architecture
-ASPECT_RATIO = 32       # model_dim = depth * ASPECT_RATIO (reduced from 64 for macOS)
-HEAD_DIM = 96           # target head dimension for attention (reduced from 128)
+ASPECT_RATIO = 40       # model_dim = depth * ASPECT_RATIO (increased from 32 for better capacity)
+HEAD_DIM = 96           # target head dimension for attention
 WINDOW_PATTERN = "L"    # sliding window pattern: L=full, S=half context
 
 # Optimization
-TOTAL_BATCH_SIZE = 2**14 # ~16K tokens per optimizer step (reduced from 2^16 for macOS)
-EMBEDDING_LR = 0.6      # learning rate for token embeddings (Adam)
-UNEMBEDDING_LR = 0.004  # learning rate for lm_head (Adam)
-MATRIX_LR = 0.04        # learning rate for matrix parameters (Muon)
-SCALAR_LR = 0.5         # learning rate for per-layer scalars (Adam)
-WEIGHT_DECAY = 0.2      # cautious weight decay for Muon
+TOTAL_BATCH_SIZE = 2**14 # ~16K tokens per optimizer step
+EMBEDDING_LR = 0.8      # increased from 0.6 for faster learning
+UNEMBEDDING_LR = 0.005  # increased from 0.004
+MATRIX_LR = 0.05        # increased from 0.04
+SCALAR_LR = 0.6         # increased from 0.5
+WEIGHT_DECAY = 0.15     # reduced from 0.2 for less regularization
 ADAM_BETAS = (0.8, 0.95) # Adam beta1, beta2
 WARMUP_RATIO = 0.0      # fraction of time budget for LR warmup
 WARMDOWN_RATIO = 0.5    # fraction of time budget for LR warmdown
 FINAL_LR_FRAC = 0.0     # final LR as fraction of initial
 
 # Model size
-DEPTH = 2               # number of transformer layers (reduced from 4 for macOS)
-DEVICE_BATCH_SIZE = 4   # per-device batch size (reduced from 16 for macOS)
+DEPTH = 3               # increased from 2 to 3 layers
+DEVICE_BATCH_SIZE = 4   # keep batch size same
 
 # ---------------------------------------------------------------------------
 # Setup: tokenizer, model, optimizer, dataloader
