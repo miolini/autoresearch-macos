@@ -194,9 +194,6 @@ class INT8SymPerTokPerHeadCompressor(KVCompressor):
     name = "int8_sym_per_tok_per_head"
 
     def compress(self, k, v):
-        # k, v: [B, T, H, D] in bf16
-        # Symmetric quantization along last dim: scale = max(|x|) / 127
-        # Cast to fp32 for stable scale computation, back to bf16 for storage.
         k_f = k.to(torch.float32)
         v_f = v.to(torch.float32)
         eps = 1e-8
@@ -214,10 +211,288 @@ class INT8SymPerTokPerHeadCompressor(KVCompressor):
 
     def decompress(self, state):
         k_q, k_scale_b, v_q, v_scale_b = state
-        # bf16 = int8 * bf16_scale (broadcast over last dim)
         k = k_q.to(torch.bfloat16) * k_scale_b
         v = v_q.to(torch.bfloat16) * v_scale_b
         return k, v
+
+
+class INTNSymPerTokPerHeadCompressor(KVCompressor):
+    """Generic N-bit symmetric per-(token,head) quantization (N in {2,4,8}).
+
+    For N=4, two values pack into one int8 byte conceptually, but the byte
+    accounting is exact: data = ceil(numel * N / 8) bytes per K/V tensor.
+    The actual stored representation here uses int8 for simplicity (so the
+    runtime is not actually saving memory in the Python tensors), but
+    `n_bytes` reports the *true* packed cost — the canonical research
+    metric. This is the standard convention in INT4/INT2 KV-cache papers.
+    """
+    def __init__(self, config, n_bits=4):
+        super().__init__(config)
+        self.n_bits = n_bits
+        self.qmax = 2 ** (n_bits - 1) - 1
+        self.qmin = -(2 ** (n_bits - 1))
+        self.name = f"int{n_bits}_sym_per_tok_per_head"
+
+    def compress(self, k, v):
+        k_f = k.to(torch.float32)
+        v_f = v.to(torch.float32)
+        eps = 1e-8
+        k_scale = k_f.abs().amax(dim=-1, keepdim=True).clamp_min(eps) / self.qmax
+        v_scale = v_f.abs().amax(dim=-1, keepdim=True).clamp_min(eps) / self.qmax
+        k_q = (k_f / k_scale).round().clamp(self.qmin, self.qmax)
+        v_q = (v_f / v_scale).round().clamp(self.qmin, self.qmax)
+        k_scale_b = k_scale.to(torch.bfloat16)
+        v_scale_b = v_scale.to(torch.bfloat16)
+        # Honest byte accounting: data is N-bit packed
+        data_bytes = ((k_q.numel() + v_q.numel()) * self.n_bits + 7) // 8
+        scale_bytes = (k_scale_b.numel() + v_scale_b.numel()) * 2
+        n_bytes = data_bytes + scale_bytes
+        # Decompress now to bf16 for downstream attention
+        k_dec = (k_q * k_scale).to(torch.bfloat16)
+        v_dec = (v_q * v_scale).to(torch.bfloat16)
+        return (k_dec, v_dec), n_bytes
+
+    def decompress(self, state):
+        return state
+
+
+class INTNGroupCompressor(KVCompressor):
+    """N-bit symmetric quantization with group-wise scales along head_dim.
+
+    Each `group_size` channels share one scale. group_size <= head_dim.
+    For group_size=16 and head_dim=96, n_bits=4, H=2:
+      data: 96*4/8 = 48 bytes per (K|V, token, head) -> 192 bytes total per token
+      scales: (96/16)*2 = 12 bytes per (K|V, token, head) -> 48 bytes per token
+      total per K+V per token per layer: 240 bytes vs 768 baseline -> 3.2x
+    """
+    def __init__(self, config, n_bits=4, group_size=16):
+        super().__init__(config)
+        self.n_bits = n_bits
+        self.group_size = group_size
+        self.qmax = 2 ** (n_bits - 1) - 1
+        self.qmin = -(2 ** (n_bits - 1))
+        self.name = f"int{n_bits}_group{group_size}"
+
+    def _quant_grouped(self, x):
+        # x: [B, T, H, D] -> grouped along D
+        B, T, H, D = x.shape
+        assert D % self.group_size == 0, f"head_dim {D} not divisible by group_size {self.group_size}"
+        G = D // self.group_size
+        x_g = x.to(torch.float32).view(B, T, H, G, self.group_size)
+        eps = 1e-8
+        scale = x_g.abs().amax(dim=-1, keepdim=True).clamp_min(eps) / self.qmax  # [B,T,H,G,1]
+        q = (x_g / scale).round().clamp(self.qmin, self.qmax)
+        # Decompress immediately
+        x_dec = (q * scale).view(B, T, H, D).to(torch.bfloat16)
+        return x_dec, scale, q.numel()
+
+    def compress(self, k, v):
+        k_dec, k_scale, k_numel = self._quant_grouped(k)
+        v_dec, v_scale, v_numel = self._quant_grouped(v)
+        data_bytes = ((k_numel + v_numel) * self.n_bits + 7) // 8
+        scale_bytes = (k_scale.numel() + v_scale.numel()) * 2  # bf16 scales
+        n_bytes = data_bytes + scale_bytes
+        return (k_dec, v_dec), n_bytes
+
+    def decompress(self, state):
+        return state
+
+
+class LowRankCompressor(KVCompressor):
+    """Per-(token,head) low-rank approximation of K, V via truncated SVD.
+
+    Each [B,T,H,D] tensor — for each (B,T,H) slice we have a vector of length D.
+    Per-vector "low-rank" doesn't reduce parameters (it IS the vector).
+    So we instead pool ACROSS heads: concatenate H heads into one [H*D] vector
+    per (B,T) and approximate that with rank r in a learned-free manner via
+    a fixed random Gaussian projection (Johnson-Lindenstrauss).
+
+    Storage: r floats (bf16) per (B, T) per layer, instead of H*D.
+    Compression ratio (K and V combined): (4*H*D) / (4*r) = H*D/r approximately.
+    """
+    def __init__(self, config, rank=32):
+        super().__init__(config)
+        self.rank = rank
+        head_dim = config.n_embd // config.n_head
+        self.name = f"randproj_rank{rank}"
+        # Fixed random projection (init-time, deterministic seed)
+        self._proj = None  # set on first call when device is known
+        self._d_full = config.n_kv_head * head_dim
+
+    def _get_proj(self, device, dtype):
+        if self._proj is None:
+            g = torch.Generator(device="cpu").manual_seed(1337)
+            P = torch.randn(self._d_full, self.rank, generator=g) / (self.rank ** 0.5)
+            self._proj = P.to(device=device, dtype=dtype)
+        return self._proj
+
+    def _project(self, x):
+        # x: [B, T, H, D] -> flatten heads -> project to rank -> back-project
+        B, T, H, D = x.shape
+        x_flat = x.reshape(B, T, H * D)
+        P = self._get_proj(x.device, x.dtype)
+        # Compress: y = x_flat @ P, shape [B, T, r]
+        y = x_flat @ P
+        # Decompress: x_hat = y @ P.T (since P is approximately orthonormal cols)
+        x_hat = y @ P.T
+        return x_hat.reshape(B, T, H, D), y
+
+    def compress(self, k, v):
+        k_hat, k_proj = self._project(k)
+        v_hat, v_proj = self._project(v)
+        # bf16 storage of the rank-r projection coefficients
+        n_bytes = (k_proj.numel() + v_proj.numel()) * 2
+        return (k_hat, v_hat), n_bytes
+
+    def decompress(self, state):
+        return state
+
+
+class SlidingWindowCompressor(KVCompressor):
+    """Keep only the last `window` tokens of K, V; drop everything older.
+
+    For positions older than `window`, we replace K, V with zeros at attention
+    time (which is equivalent to "no contribution" to softmax, modulo the
+    implicit -inf score for excluded positions). Storage: 0 bytes for old
+    tokens, full bf16 for tokens within the window.
+    """
+    def __init__(self, config, window=128):
+        super().__init__(config)
+        self.window = window
+        self.name = f"sliding_window_{window}"
+
+    def compress(self, k, v):
+        # k, v: [B, T, H, D] bf16
+        B, T, H, D = k.shape
+        if T <= self.window:
+            n_bytes = (k.numel() + v.numel()) * 2
+            return (k, v), n_bytes
+        # Zero out positions outside the recent window
+        k_keep = k.clone()
+        v_keep = v.clone()
+        cutoff = T - self.window
+        k_keep[:, :cutoff].zero_()
+        v_keep[:, :cutoff].zero_()
+        # Bytes: only the kept tokens count (zeros aren't stored in real cache)
+        n_bytes = (B * self.window * H * D * 2) * 2  # K and V
+        return (k_keep, v_keep), n_bytes
+
+    def decompress(self, state):
+        return state
+
+
+class HybridRecentFullOldQuantCompressor(KVCompressor):
+    """Recent tokens kept in bf16; older tokens INT4 quantized.
+
+    Combines two ideas: full quality for the most recent `recent` tokens
+    (which dominate attention in many tasks) and aggressive INT4 quant for
+    older tokens (where small errors are diluted in the softmax).
+    """
+    def __init__(self, config, recent=64, n_bits_old=4):
+        super().__init__(config)
+        self.recent = recent
+        self.n_bits = n_bits_old
+        self.qmax = 2 ** (n_bits_old - 1) - 1
+        self.qmin = -(2 ** (n_bits_old - 1))
+        self.name = f"hybrid_recent{recent}_int{n_bits_old}_old"
+
+    def _quant_old(self, x_old):
+        # symmetric per-(token,head) quant
+        x_f = x_old.to(torch.float32)
+        eps = 1e-8
+        scale = x_f.abs().amax(dim=-1, keepdim=True).clamp_min(eps) / self.qmax
+        q = (x_f / scale).round().clamp(self.qmin, self.qmax)
+        x_dec = (q * scale).to(torch.bfloat16)
+        return x_dec, q.numel(), scale.numel()
+
+    def compress(self, k, v):
+        B, T, H, D = k.shape
+        if T <= self.recent:
+            n_bytes = (k.numel() + v.numel()) * 2
+            return (k, v), n_bytes
+        cutoff = T - self.recent
+        k_old, k_new = k[:, :cutoff], k[:, cutoff:]
+        v_old, v_new = v[:, :cutoff], v[:, cutoff:]
+        k_old_dec, kq_n, ks_n = self._quant_old(k_old)
+        v_old_dec, vq_n, vs_n = self._quant_old(v_old)
+        k_full = torch.cat([k_old_dec, k_new], dim=1)
+        v_full = torch.cat([v_old_dec, v_new], dim=1)
+        # Bytes: recent in bf16 + old quantized
+        recent_bytes = (k_new.numel() + v_new.numel()) * 2
+        old_data_bytes = ((kq_n + vq_n) * self.n_bits + 7) // 8
+        old_scale_bytes = (ks_n + vs_n) * 2  # bf16 scales
+        n_bytes = recent_bytes + old_data_bytes + old_scale_bytes
+        return (k_full, v_full), n_bytes
+
+    def decompress(self, state):
+        return state
+
+
+class AsymINTNCompressor(KVCompressor):
+    """Asymmetric N-bit per-(token,head) quantization with zero-point.
+    Storage adds a per-(B,T,H) zero-point in bf16.
+    """
+    def __init__(self, config, n_bits=4):
+        super().__init__(config)
+        self.n_bits = n_bits
+        self.qmax = 2 ** n_bits - 1
+        self.name = f"int{n_bits}_asym_per_tok_per_head"
+
+    def _quant_asym(self, x):
+        x_f = x.to(torch.float32)
+        x_min = x_f.amin(dim=-1, keepdim=True)
+        x_max = x_f.amax(dim=-1, keepdim=True)
+        scale = (x_max - x_min).clamp_min(1e-8) / self.qmax
+        zero = x_min
+        q = ((x_f - zero) / scale).round().clamp(0, self.qmax)
+        x_dec = (q * scale + zero).to(torch.bfloat16)
+        return x_dec, q.numel(), scale.numel(), zero.numel()
+
+    def compress(self, k, v):
+        k_dec, kq_n, ks_n, kz_n = self._quant_asym(k)
+        v_dec, vq_n, vs_n, vz_n = self._quant_asym(v)
+        data_bytes = ((kq_n + vq_n) * self.n_bits + 7) // 8
+        scale_bytes = (ks_n + vs_n) * 2
+        zero_bytes = (kz_n + vz_n) * 2
+        n_bytes = data_bytes + scale_bytes + zero_bytes
+        return (k_dec, v_dec), n_bytes
+
+    def decompress(self, state):
+        return state
+
+
+class KHigherPrecVLowerPrecCompressor(KVCompressor):
+    """Mixed-precision: K kept at higher bit-width than V (or vice versa).
+    Hypothesis: K (used as similarity reference) may need more precision
+    than V (which is just being averaged over).
+    """
+    def __init__(self, config, k_bits=8, v_bits=4):
+        super().__init__(config)
+        self.k_bits = k_bits
+        self.v_bits = v_bits
+        self.k_max = 2 ** (k_bits - 1) - 1
+        self.k_min = -(2 ** (k_bits - 1))
+        self.v_max = 2 ** (v_bits - 1) - 1
+        self.v_min = -(2 ** (v_bits - 1))
+        self.name = f"mixed_K{k_bits}_V{v_bits}"
+
+    def _q(self, x, qmax, qmin):
+        x_f = x.to(torch.float32)
+        scale = x_f.abs().amax(dim=-1, keepdim=True).clamp_min(1e-8) / qmax
+        q = (x_f / scale).round().clamp(qmin, qmax)
+        x_dec = (q * scale).to(torch.bfloat16)
+        return x_dec, q.numel(), scale.numel()
+
+    def compress(self, k, v):
+        k_dec, kq_n, ks_n = self._q(k, self.k_max, self.k_min)
+        v_dec, vq_n, vs_n = self._q(v, self.v_max, self.v_min)
+        n_bytes = ((kq_n * self.k_bits + 7) // 8 +
+                   (vq_n * self.v_bits + 7) // 8 +
+                   (ks_n + vs_n) * 2)
+        return (k_dec, v_dec), n_bytes
+
+    def decompress(self, state):
+        return state
 
 
 # Holds the active compressor during compression eval. Set by the eval driver.
