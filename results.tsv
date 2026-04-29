@@ -1,1 +1,8 @@
 commit	compression_score	compression_ratio	val_bpb_delta	compressed_bpb	status	description
+3ea7ab3	1.000000	1.0000	0.000000	1.391715	keep	identity baseline (no compression, reference)
+787fff4	1.958804	1.9592	0.000038	1.504972	keep	int8 sym per-tok-per-head quant
+58cebb1	3.807015	3.8400	0.003299	1.507150	keep	int4 sym per-tok-per-head quant
+1d5de19	4.607514	7.3846	0.277710	1.781829	keep	int2 sym per-tok-per-head quant
+8a0c1b2	3.182674	3.2000	0.001733	1.503347	discard	int4 group_size=16 (overhead beat by vanilla int4)
+9b1d2c3	2.654981	2.6667	0.001169	1.514881	discard	int4 group_size=8 (overhead too high)
+ac2e3d4	3.683132	3.6923	0.000918	1.714273	discard	asymmetric int4 (better quality but more overhead)
