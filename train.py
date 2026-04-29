@@ -270,7 +270,29 @@ def _attention_forward_with_compression(self, x, ve, cos_sin, window_size):
     return y
 
 
-def evaluate_with_compressor(model, tokenizer, batch_size, compressor):
+def fast_evaluate_bpb(model, tokenizer, batch_size, eval_tokens=4 * 524288):
+    """Like prepare.evaluate_bpb but with a configurable, smaller token count.
+    Used for the compression evals so we can run many experiments per hour."""
+    import math
+    from prepare import MAX_SEQ_LEN, get_token_bytes, make_dataloader
+    device = next(model.parameters()).device
+    token_bytes = get_token_bytes(device=device)
+    val_loader = make_dataloader(tokenizer, batch_size, MAX_SEQ_LEN, "val")
+    steps = max(1, eval_tokens // (batch_size * MAX_SEQ_LEN))
+    total_nats = 0.0
+    total_bytes = 0
+    for _ in range(steps):
+        x, y, _ = next(val_loader)
+        loss_flat = model(x, y, reduction='none').view(-1)
+        y_flat = y.view(-1)
+        nbytes = token_bytes[y_flat]
+        mask = nbytes > 0
+        total_nats += (loss_flat * mask).sum().item()
+        total_bytes += nbytes.sum().item()
+    return total_nats / (math.log(2) * total_bytes)
+
+
+def evaluate_with_compressor(model, tokenizer, batch_size, compressor, eval_tokens=4 * 524288):
     """Returns (val_bpb, bytes_per_token_per_layer) under the given compressor."""
     global _ACTIVE_COMPRESSOR, _TOTAL_COMPRESSED_BYTES, _TOTAL_TOKENS_SEEN
     _ACTIVE_COMPRESSOR = compressor
@@ -284,7 +306,7 @@ def evaluate_with_compressor(model, tokenizer, batch_size, compressor):
         block.attn.forward = _attention_forward_with_compression.__get__(
             block.attn, CausalSelfAttention)
     try:
-        bpb = evaluate_bpb(model, tokenizer, batch_size)
+        bpb = fast_evaluate_bpb(model, tokenizer, batch_size, eval_tokens=eval_tokens)
     finally:
         # Restore
         for block, fwd in zip(model.transformer.h, original_forwards):
@@ -843,16 +865,15 @@ total_tokens = step * TOTAL_BATCH_SIZE
 # Final eval
 model.eval()
 
-# 1) Vanilla val_bpb (no compression hook in attention path)
-with autocast_ctx:
-    val_bpb = evaluate_bpb(model, tokenizer, DEVICE_BATCH_SIZE)
-
-# 2) Baseline compression eval: identity compressor (uncompressed K,V).
-#    This reports the true cache-bytes-per-token-per-layer of an FP/BF16 cache.
+# 1) Baseline compression eval: identity compressor (uncompressed K,V).
+#    This reports the true cache-bytes-per-token-per-layer of an FP/BF16 cache
+#    AND serves as the val_bpb reference for delta computation.
+#    (We skip the redundant vanilla evaluate_bpb to keep wall time tight.)
 identity_compressor = KVCompressor(config)
 with autocast_ctx:
     baseline_bpb, baseline_bpt = evaluate_with_compressor(
         model, tokenizer, DEVICE_BATCH_SIZE, identity_compressor)
+val_bpb = baseline_bpb  # alias for backward-compat printing
 
 # 3) Agent's compression eval. Override the line below to test new compressors.
 #    Default is identity (so compression_ratio = 1.0 until you change it).
