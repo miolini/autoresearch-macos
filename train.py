@@ -181,6 +181,45 @@ class KVCompressor:
         return k, v
 
 
+class INT8SymPerTokPerHeadCompressor(KVCompressor):
+    """INT8 symmetric per-(token,head) quantization of K and V.
+
+    Each (B, T, H) slice along head_dim is quantized with its own bf16 scale,
+    no zero-point (symmetric). Storage:
+      int8 values: B*T*H*D bytes
+      bf16 scale:  B*T*H*2 bytes
+    Per token per layer: 2*(2*H*D + 2*H*2) = 4*H*D + 8*H bytes
+    For H=2, D=96: 768 (bf16 baseline) -> 392 (~1.96x ratio).
+    """
+    name = "int8_sym_per_tok_per_head"
+
+    def compress(self, k, v):
+        # k, v: [B, T, H, D] in bf16
+        # Symmetric quantization along last dim: scale = max(|x|) / 127
+        # Cast to fp32 for stable scale computation, back to bf16 for storage.
+        k_f = k.to(torch.float32)
+        v_f = v.to(torch.float32)
+        eps = 1e-8
+        k_scale = k_f.abs().amax(dim=-1, keepdim=True).clamp_min(eps) / 127.0
+        v_scale = v_f.abs().amax(dim=-1, keepdim=True).clamp_min(eps) / 127.0
+        k_q = (k_f / k_scale).round().clamp(-128, 127).to(torch.int8)
+        v_q = (v_f / v_scale).round().clamp(-128, 127).to(torch.int8)
+        k_scale_b = k_scale.to(torch.bfloat16)
+        v_scale_b = v_scale.to(torch.bfloat16)
+        n_bytes = (k_q.numel() * k_q.element_size()
+                   + v_q.numel() * v_q.element_size()
+                   + k_scale_b.numel() * k_scale_b.element_size()
+                   + v_scale_b.numel() * v_scale_b.element_size())
+        return (k_q, k_scale_b, v_q, v_scale_b), n_bytes
+
+    def decompress(self, state):
+        k_q, k_scale_b, v_q, v_scale_b = state
+        # bf16 = int8 * bf16_scale (broadcast over last dim)
+        k = k_q.to(torch.bfloat16) * k_scale_b
+        v = v_q.to(torch.bfloat16) * v_scale_b
+        return k, v
+
+
 # Holds the active compressor during compression eval. Set by the eval driver.
 _ACTIVE_COMPRESSOR = None
 _TOTAL_COMPRESSED_BYTES = 0
@@ -252,9 +291,11 @@ def evaluate_with_compressor(model, tokenizer, batch_size, compressor):
             block.attn.forward = fwd
         _ACTIVE_COMPRESSOR = None
 
-    n_layer = len(model.transformer.h)
+    # _TOTAL_TOKENS_SEEN was incremented once per (forward, layer); so it already
+    # equals (n_layer * batches * B * T). Hence dividing _TOTAL_COMPRESSED_BYTES
+    # by it gives bytes per (token, layer) directly.
     if _TOTAL_TOKENS_SEEN > 0:
-        bytes_per_token_per_layer = _TOTAL_COMPRESSED_BYTES / _TOTAL_TOKENS_SEEN / n_layer
+        bytes_per_token_per_layer = _TOTAL_COMPRESSED_BYTES / _TOTAL_TOKENS_SEEN
     else:
         bytes_per_token_per_layer = 0.0
     return bpb, bytes_per_token_per_layer
@@ -815,7 +856,7 @@ with autocast_ctx:
 
 # 3) Agent's compression eval. Override the line below to test new compressors.
 #    Default is identity (so compression_ratio = 1.0 until you change it).
-agent_compressor = KVCompressor(config)
+agent_compressor = INT8SymPerTokPerHeadCompressor(config)
 with autocast_ctx:
     compressed_bpb, compressed_bpt = evaluate_with_compressor(
         model, tokenizer, DEVICE_BATCH_SIZE, agent_compressor)
