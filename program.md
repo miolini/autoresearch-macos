@@ -1,114 +1,208 @@
-# autoresearch
+# autoresearch — KV-Cache Compression Discovery
 
-This is an experiment to have the LLM do its own research.
+This is an autonomous research project. **Goal: discover novel KV-cache
+compression methods that reduce attention K/V memory while preserving model
+quality.** Each experiment trains a small GPT for 5 minutes, then runs a
+compression eval that reports a composite `compression_score`.
 
 ## Setup
 
 To set up a new experiment, work with the user to:
 
-1. **Agree on a run tag**: propose a tag based on today's date (e.g. `mar5`). The branch `autoresearch/<tag>` must not already exist — this is a fresh run.
+1. **Agree on a run tag**: propose a tag based on today's date (e.g. `apr29`).
+   The branch `autoresearch/<tag>` must not already exist — this is a fresh run.
 2. **Create the branch**: `git checkout -b autoresearch/<tag>` from current master.
-3. **Read the in-scope files**: The repo is small. Read these files for full context:
+3. **Read the in-scope files**:
    - `README.md` — repository context.
-   - `prepare.py` — fixed constants, data prep, tokenizer, dataloader, evaluation. Do not modify.
-   - `train.py` — the file you modify. Model architecture, optimizer, training loop.
-4. **Verify data exists**: Check that `~/.cache/autoresearch/` contains data shards and a tokenizer. If not, tell the human to run `uv run prepare.py`.
-5. **Initialize results.tsv**: Create `results.tsv` with just the header row. The baseline will be recorded after the first run.
+   - `prepare.py` — fixed constants, data prep, tokenizer, dataloader,
+     `evaluate_bpb`. Do not modify.
+   - `train.py` — the file you modify. Only edit the `KVCompressor` class
+     and the `agent_compressor = ...` line in the final eval section, plus
+     hyperparameter tweaks if needed for stable training.
+4. **Verify data exists**: Check that `~/.cache/autoresearch/` contains data
+   shards and a tokenizer. If not, tell the human to run `uv run prepare.py`.
+5. **Initialize results.tsv**: Create `results.tsv` with just the header row.
+   The baseline will be recorded after the first run.
 6. **Confirm and go**: Confirm setup looks good.
 
-Once you get confirmation, kick off the experimentation.
+Once you get confirmation, kick off the experimentation and DO NOT STOP until
+the human manually interrupts you.
 
-## Experimentation
+## The research problem
 
-Each experiment runs on a single GPU. The training script runs for a **fixed time budget of 5 minutes** (wall clock training time, excluding startup/compilation). You launch it simply as: `uv run train.py`.
+Standard transformer KV cache stores K and V tensors in BF16/FP16 per layer
+per token, costing `2 * n_kv_head * head_dim * 2 bytes` per token per layer.
+For long contexts and large models this dominates inference memory.
 
-**What you CAN do:**
-- Modify `train.py` — this is the only file you edit. Everything is fair game: model architecture, optimizer, hyperparameters, training loop, batch size, model size, etc.
+Your job is to design **alternative representations** of K, V that are
+cheaper to store but reproduce the original attention output closely enough
+that `val_bpb` barely changes.
 
-**What you CANNOT do:**
-- Modify `prepare.py`. It is read-only. It contains the fixed evaluation, data loading, tokenizer, and training constants (time budget, sequence length, etc).
-- Install new packages or add dependencies. You can only use what's already in `pyproject.toml`.
-- Modify the evaluation harness. The `evaluate_bpb` function in `prepare.py` is the ground truth metric.
+## The metric
 
-**The goal is simple: get the lowest val_bpb.** Since the time budget is fixed, you don't need to worry about training time — it's always 5 minutes. Everything is fair game: change the architecture, the optimizer, the hyperparameters, the batch size, the model size. The only constraint is that the code runs without crashing and finishes within the time budget.
+After each run the script prints:
 
-**VRAM** is a soft constraint. Some increase is acceptable for meaningful val_bpb gains, but it should not blow up dramatically.
+```
+baseline_bpb:             X         # uncompressed cache, sets the quality floor
+compressed_bpb:           Y         # cache with YOUR compressor
+val_bpb_delta:            Y - X     # >0 means quality lost
+baseline_bytes_per_tok:   Bb        # uncompressed cache bytes / (token * layer)
+compressed_bytes_per_tok: Bc        # compressed cache bytes / (token * layer)
+compression_ratio:        Bb / Bc   # higher = better
+compression_score:        ratio - 10 * max(delta, 0)   # higher = better
+```
 
-**Simplicity criterion**: All else being equal, simpler is better. A small improvement that adds ugly complexity is not worth it. Conversely, removing something and getting equal or better results is a great outcome — that's a simplification win. When evaluating whether to keep a change, weigh the complexity cost against the improvement magnitude. A 0.001 val_bpb improvement that adds 20 lines of hacky code? Probably not worth it. A 0.001 val_bpb improvement from deleting code? Definitely keep. An improvement of ~0 but much simpler code? Keep.
+Optimize **`compression_score`**. Identity compressor scores exactly 1.0.
+Anything > 1.0 is a real win. The alpha (10.0) means a 0.01 bpb regression
+costs you 0.1 of compression ratio — pick that tradeoff carefully.
 
-**The first run**: Your very first run should always be to establish the baseline, so you will run the training script as is.
+## What you CAN do
+
+- Edit the `KVCompressor` class in `train.py` (the entire body — `compress`,
+  `decompress`, `__init__`, helpers, new fields).
+- Replace `agent_compressor = KVCompressor(config)` with a custom subclass /
+  factory that swaps in your method.
+- Stack multiple compression tricks (e.g. quantization + low-rank).
+- Adjust the byte-counting in `compress()` to honestly reflect storage —
+  cheating by under-reporting bytes is an immediate revert.
+
+## What you CANNOT do
+
+- Modify `prepare.py` or `evaluate_bpb`. The eval is the ground truth.
+- Modify the training loop, model architecture, optimizer, or hyperparameters
+  (those are not the research question — the model is just a frozen substrate
+  for testing compression). If a run crashes during training, fix the
+  compressor, do not touch training.
+- Install new packages.
+- Lie about `n_bytes` returned from `compress()`. It must equal the actual
+  storage cost of `state` (sum of tensor `numel * element_size` for any
+  tensors in `state`, plus any scalar metadata).
+
+## Compression directions to explore
+
+Pick from these or combine them. Start simple, then stack.
+
+1. **Quantization**
+   - INT8 / INT4 per-channel quantization of K, V (scale + zero-point).
+   - Asymmetric quantization (different ranges for K vs V).
+   - Mixed precision: K in lower precision than V (or vice versa).
+   - Group-wise quantization (per head, per channel-block).
+
+2. **Low-rank approximation**
+   - SVD of K, V down to rank r << head_dim.
+   - Shared low-rank basis across heads (multi-query-style consolidation).
+   - Project K, V to a smaller subspace, store coefficients only.
+
+3. **Token eviction / sparsification**
+   - Keep only top-k tokens by attention weight (StreamingLLM style).
+   - Sliding window of recent tokens + sink tokens.
+   - Token merging (combine similar K, V across positions).
+
+4. **Head pruning / sharing**
+   - Drop entire heads' K, V (relies on remaining heads).
+   - Share K (or V) across head groups beyond GQA.
+
+5. **Hybrid representations**
+   - Store keys at higher precision than values (or vice versa).
+   - Recent tokens uncompressed, older tokens aggressively compressed.
+
+6. **Static / training-free learned compression**
+   - Random projections (no learning needed, model is frozen).
+   - Hashing-based compression.
+
+## The first run
+
+Your very first run should establish the baseline by leaving the compressor
+unchanged (identity). The TSV will record `compression_ratio = 1.0` and
+`compression_score = 1.0`. Every subsequent run aims to beat that.
 
 ## Output format
 
-Once the script finishes it prints a summary like this:
-
 ```
 ---
-val_bpb:          0.997900
-training_seconds: 300.1
-total_seconds:    325.9
-peak_vram_mb:     45060.2
-mfu_percent:      39.80
-total_tokens_M:   499.6
-num_steps:        953
-num_params_M:     50.3
-depth:            8
+val_bpb:                0.997900
+baseline_bpb:           0.997900
+compressed_bpb:         1.001200
+val_bpb_delta:          0.003300
+baseline_bytes_per_tok: 768.00
+compressed_bytes_per_tok: 192.00
+compression_ratio:      4.0000
+compressor_name:        int4_per_channel
+compression_score:      3.967000
+...
 ```
 
-Note that the script is configured to always stop after 5 minutes, so depending on the computing platform of this computer the numbers might look different. You can extract the key metric from the log file:
-
-```
-grep "^val_bpb:" run.log
+Extract metrics with:
+```bash
+grep -E "^compression_score:|^compression_ratio:|^val_bpb_delta:|^compressed_bpb:" run.log
 ```
 
 ## Logging results
 
-When an experiment is done, log it to `results.tsv` (tab-separated, NOT comma-separated — commas break in descriptions).
-
-The TSV has a header row and 5 columns:
+Tab-separated. Header:
 
 ```
-commit	val_bpb	memory_gb	status	description
+commit	compression_score	compression_ratio	val_bpb_delta	compressed_bpb	status	description
 ```
 
 1. git commit hash (short, 7 chars)
-2. val_bpb achieved (e.g. 1.234567) — use 0.000000 for crashes
-3. peak memory in GB, round to .1f (e.g. 12.3 — divide peak_vram_mb by 1024) — use 0.0 for crashes
-4. status: `keep`, `discard`, or `crash`
-5. short text description of what this experiment tried
+2. compression_score (e.g. 3.967000) — use 0.0 for crashes
+3. compression_ratio (e.g. 4.0000) — use 0.0 for crashes
+4. val_bpb_delta (e.g. 0.003300) — use 0.0 for crashes
+5. compressed_bpb (e.g. 1.001200) — use 0.0 for crashes
+6. status: `keep`, `discard`, or `crash`
+7. short text description of the compressor tried
 
 Example:
 
 ```
-commit	val_bpb	memory_gb	status	description
-a1b2c3d	0.997900	44.0	keep	baseline
-b2c3d4e	0.993200	44.2	keep	increase LR to 0.04
-c3d4e5f	1.005000	44.0	discard	switch to GeLU activation
-d4e5f6g	0.000000	0.0	crash	double model width (OOM)
+commit	compression_score	compression_ratio	val_bpb_delta	compressed_bpb	status	description
+a1b2c3d	1.000000	1.0000	0.000000	0.997900	keep	identity baseline
+b2c3d4e	3.967000	4.0000	0.003300	1.001200	keep	int4 per-channel quantization
+c3d4e5f	0.500000	2.0000	0.150000	1.147900	discard	rank-4 SVD (too lossy)
+d4e5f6g	0.000000	0.0	0.000000	0.000000	crash	int1 quant (NaN in attention)
 ```
 
 ## The experiment loop
 
-The experiment runs on a dedicated branch (e.g. `autoresearch/mar5` or `autoresearch/mar5-gpu0`).
+The experiment runs on a dedicated branch (e.g. `autoresearch/apr29`).
 
 LOOP FOREVER:
 
-1. Look at the git state: the current branch/commit we're on
-2. Tune `train.py` with an experimental idea by directly hacking the code.
-3. git commit
-4. Run the experiment: `uv run train.py > run.log 2>&1` (redirect everything — do NOT use tee or let output flood your context)
-5. Read out the results: `grep "^val_bpb:\|^peak_vram_mb:" run.log`
-6. If the grep output is empty, the run crashed. Run `tail -n 50 run.log` to read the Python stack trace and attempt a fix. If you can't get things to work after more than a few attempts, give up.
-7. Record the results in the tsv
-8. If val_bpb improved (lower), you "advance" the branch, keeping the git commit
-9. If val_bpb is equal or worse, you git reset back to where you started
+1. Look at the git state: current branch/commit.
+2. Modify `KVCompressor` (or swap `agent_compressor`) with a new compression idea.
+3. `git commit` the change with a short, descriptive message.
+4. Run: `uv run train.py > run.log 2>&1` (do NOT pipe to stdout/tee — keep
+   logs out of your context).
+5. Read out the metrics:
+   `grep -E "^compression_score:|^compression_ratio:|^val_bpb_delta:|^compressed_bpb:" run.log`
+6. If the grep is empty, the run crashed. `tail -n 50 run.log` for the trace.
+   If it's a small fix, fix and retry. If the idea is fundamentally broken,
+   record a `crash` row and move on.
+7. Append a row to `results.tsv`.
+8. If `compression_score` improved (higher), keep the commit (advance branch).
+9. If equal or worse, `git reset --hard` to where you started.
 
-The idea is that you are a completely autonomous researcher trying things out. If they work, keep. If they don't, discard. And you're advancing the branch so that you can iterate. If you feel like you're getting stuck in some way, you can rewind but you should probably do this very very sparingly (if ever).
+**Timeout**: Each experiment should take ~5 minutes training + ~1-2 minutes
+eval (two passes — baseline + compressed). If a run exceeds 12 minutes total,
+kill it and treat as a failure.
 
-**Timeout**: Each experiment should take ~5 minutes total (+ a few seconds for startup and eval overhead). If a run exceeds 10 minutes, kill it and treat it as a failure (discard and revert).
+**Crashes**: shape mismatches, NaNs from too-aggressive quantization, OOM
+from blowing up the cache representation — all common. Use judgment: small
+fixable bug → fix and retry. Idea is fundamentally broken → record crash,
+revert, move on.
 
-**Crashes**: If a run crashes (OOM, or a bug, or etc.), use your judgment: If it's something dumb and easy to fix (e.g. a typo, a missing import), fix it and re-run. If the idea itself is fundamentally broken, just skip it, log "crash" as the status in the tsv, and move on.
+**NEVER STOP, NEVER ASK FOR PERMISSION**: Once the loop has begun, do NOT
+pause to ask "should I continue?" or "is this a good stopping point?" or
+"do you want me to try X?". You are fully autonomous. The human might be
+asleep. Run until manually interrupted, period.
 
-**NEVER STOP**: Once the experiment loop has begun (after the initial setup), do NOT pause to ask the human if you should continue. Do NOT ask "should I keep going?" or "is this a good stopping point?". The human might be asleep, or gone from a computer and expects you to continue working *indefinitely* until you are manually stopped. You are autonomous. If you run out of ideas, think harder — read papers referenced in the code, re-read the in-scope files for new angles, try combining previous near-misses, try more radical architectural changes. The loop runs until the human interrupts you, period.
+If you run out of ideas: re-read the "Compression directions" list above,
+look at near-miss experiments and try combining them, attempt a more radical
+approach (e.g. learned hashing), or try aggressive parameters of an idea
+that already worked.
 
-As an example use case, a user might leave you running while they sleep. If each experiment takes you ~5 minutes then you can run approx 12/hour, for a total of about 100 over the duration of the average human sleep. The user then wakes up to experimental results, all completed by you while they slept!
+As a guideline: 5-min training + ~1-min eval → ~10/hour → ~80 experiments
+overnight. The user wakes up to a `results.tsv` full of compression methods
+ranked by `compression_score`, with the current branch HEAD pointing to the
+best one found.

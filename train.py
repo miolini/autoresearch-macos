@@ -144,6 +144,127 @@ class Block(nn.Module):
         return x
 
 
+# ============================================================================
+# KV-CACHE COMPRESSION RESEARCH (AGENT EDITS THIS SECTION)
+# ----------------------------------------------------------------------------
+# Goal: design a KVCompressor that minimizes cache memory while keeping val_bpb
+# close to the uncompressed baseline. Modify the class below freely. Track
+# (compression_ratio, val_bpb_delta) — higher ratio + smaller delta = better.
+# ============================================================================
+
+class KVCompressor:
+    """Compresses K, V tensors at attention time.
+
+    The agent should subclass / rewrite this. The default is the IDENTITY
+    compressor (no compression) which serves as the baseline.
+
+    Contract:
+      - compress(k, v) returns (state, byte_count). `state` is whatever
+        representation you want (tensor, tuple, dict, ...). `byte_count` is
+        the actual storage cost in bytes.
+      - decompress(state) returns (k_out, v_out) usable by SDPA, with the
+        same shape as the inputs to compress() and dtype matching the rest
+        of the model (bf16 on MPS/CPU, bf16/fp16 on CUDA).
+    """
+    name = "identity"
+
+    def __init__(self, config):
+        self.config = config
+
+    def compress(self, k, v):
+        # k, v: [B, T, n_kv_head, head_dim]
+        n_bytes = k.numel() * k.element_size() + v.numel() * v.element_size()
+        return (k, v), n_bytes
+
+    def decompress(self, state):
+        k, v = state
+        return k, v
+
+
+# Holds the active compressor during compression eval. Set by the eval driver.
+_ACTIVE_COMPRESSOR = None
+_TOTAL_COMPRESSED_BYTES = 0
+_TOTAL_TOKENS_SEEN = 0
+
+
+def _attention_forward_with_compression(self, x, ve, cos_sin, window_size):
+    """Replacement for CausalSelfAttention.forward that routes K, V through
+    _ACTIVE_COMPRESSOR. Wired in only during compression eval."""
+    global _TOTAL_COMPRESSED_BYTES, _TOTAL_TOKENS_SEEN
+    B, T, C = x.size()
+    q = self.c_q(x).view(B, T, self.n_head, self.head_dim)
+    k = self.c_k(x).view(B, T, self.n_kv_head, self.head_dim)
+    v = self.c_v(x).view(B, T, self.n_kv_head, self.head_dim)
+
+    if ve is not None:
+        ve = ve.view(B, T, self.n_kv_head, self.head_dim)
+        gate = 2 * torch.sigmoid(self.ve_gate(x[..., :self.ve_gate_channels]))
+        v = v + gate.unsqueeze(-1) * ve
+
+    cos, sin = cos_sin
+    q, k = apply_rotary_emb(q, cos, sin), apply_rotary_emb(k, cos, sin)
+    q, k = norm(q), norm(k)
+
+    # *** COMPRESSION HOOK ***
+    if _ACTIVE_COMPRESSOR is not None:
+        state, n_bytes = _ACTIVE_COMPRESSOR.compress(k, v)
+        k, v = _ACTIVE_COMPRESSOR.decompress(state)
+        _TOTAL_COMPRESSED_BYTES += n_bytes
+        _TOTAL_TOKENS_SEEN += B * T
+
+    k = k.repeat_interleave(self.n_head // self.n_kv_head, dim=2)
+    v = v.repeat_interleave(self.n_head // self.n_kv_head, dim=2)
+    q = q.transpose(1, 2)
+    k = k.transpose(1, 2)
+    v = v.transpose(1, 2)
+
+    window = window_size[0]
+    if window > 0 and window < T:
+        mask = torch.ones(T, T, dtype=torch.bool, device=q.device).tril()
+        mask = mask.triu(diagonal=1 - window)
+        y = F.scaled_dot_product_attention(q, k, v, attn_mask=mask)
+    else:
+        y = F.scaled_dot_product_attention(q, k, v, is_causal=True)
+
+    y = y.transpose(1, 2).contiguous().view(B, T, -1)
+    y = self.c_proj(y)
+    return y
+
+
+def evaluate_with_compressor(model, tokenizer, batch_size, compressor):
+    """Returns (val_bpb, bytes_per_token_per_layer) under the given compressor."""
+    global _ACTIVE_COMPRESSOR, _TOTAL_COMPRESSED_BYTES, _TOTAL_TOKENS_SEEN
+    _ACTIVE_COMPRESSOR = compressor
+    _TOTAL_COMPRESSED_BYTES = 0
+    _TOTAL_TOKENS_SEEN = 0
+
+    # Monkey-patch all attention forwards to use the compression hook
+    original_forwards = []
+    for block in model.transformer.h:
+        original_forwards.append(block.attn.forward)
+        block.attn.forward = _attention_forward_with_compression.__get__(
+            block.attn, CausalSelfAttention)
+    try:
+        bpb = evaluate_bpb(model, tokenizer, batch_size)
+    finally:
+        # Restore
+        for block, fwd in zip(model.transformer.h, original_forwards):
+            block.attn.forward = fwd
+        _ACTIVE_COMPRESSOR = None
+
+    n_layer = len(model.transformer.h)
+    if _TOTAL_TOKENS_SEEN > 0:
+        bytes_per_token_per_layer = _TOTAL_COMPRESSED_BYTES / _TOTAL_TOKENS_SEEN / n_layer
+    else:
+        bytes_per_token_per_layer = 0.0
+    return bpb, bytes_per_token_per_layer
+
+
+# ============================================================================
+# END KV-CACHE COMPRESSION SECTION
+# ============================================================================
+
+
 class GPT(nn.Module):
     def __init__(self, config):
         super().__init__()
@@ -680,8 +801,31 @@ total_tokens = step * TOTAL_BATCH_SIZE
 
 # Final eval
 model.eval()
+
+# 1) Vanilla val_bpb (no compression hook in attention path)
 with autocast_ctx:
     val_bpb = evaluate_bpb(model, tokenizer, DEVICE_BATCH_SIZE)
+
+# 2) Baseline compression eval: identity compressor (uncompressed K,V).
+#    This reports the true cache-bytes-per-token-per-layer of an FP/BF16 cache.
+identity_compressor = KVCompressor(config)
+with autocast_ctx:
+    baseline_bpb, baseline_bpt = evaluate_with_compressor(
+        model, tokenizer, DEVICE_BATCH_SIZE, identity_compressor)
+
+# 3) Agent's compression eval. Override the line below to test new compressors.
+#    Default is identity (so compression_ratio = 1.0 until you change it).
+agent_compressor = KVCompressor(config)
+with autocast_ctx:
+    compressed_bpb, compressed_bpt = evaluate_with_compressor(
+        model, tokenizer, DEVICE_BATCH_SIZE, agent_compressor)
+
+# Compression metrics
+compression_ratio = baseline_bpt / compressed_bpt if compressed_bpt > 0 else 0.0
+val_bpb_delta = compressed_bpb - baseline_bpb  # >0 = quality lost
+# Composite score (higher = better). Penalty α tunes quality vs ratio tradeoff.
+COMPRESSION_SCORE_ALPHA = 10.0
+compression_score = compression_ratio - COMPRESSION_SCORE_ALPHA * max(val_bpb_delta, 0.0)
 
 # Final summary
 t_end = time.time()
@@ -693,12 +837,20 @@ else:
     peak_vram_mb = 0.0
 
 print("---")
-print(f"val_bpb:          {val_bpb:.6f}")
-print(f"training_seconds: {total_training_time:.1f}")
-print(f"total_seconds:    {t_end - t_start:.1f}")
-print(f"peak_vram_mb:     {peak_vram_mb:.1f}")
-print(f"mfu_percent:      {steady_state_mfu:.2f}")
-print(f"total_tokens_M:   {total_tokens / 1e6:.1f}")
-print(f"num_steps:        {step}")
-print(f"num_params_M:     {num_params / 1e6:.1f}")
-print(f"depth:            {DEPTH}")
+print(f"val_bpb:                {val_bpb:.6f}")
+print(f"baseline_bpb:           {baseline_bpb:.6f}")
+print(f"compressed_bpb:         {compressed_bpb:.6f}")
+print(f"val_bpb_delta:          {val_bpb_delta:.6f}")
+print(f"baseline_bytes_per_tok: {baseline_bpt:.2f}")
+print(f"compressed_bytes_per_tok: {compressed_bpt:.2f}")
+print(f"compression_ratio:      {compression_ratio:.4f}")
+print(f"compressor_name:        {agent_compressor.name}")
+print(f"compression_score:      {compression_score:.6f}")
+print(f"training_seconds:       {total_training_time:.1f}")
+print(f"total_seconds:          {t_end - t_start:.1f}")
+print(f"peak_vram_mb:           {peak_vram_mb:.1f}")
+print(f"mfu_percent:            {steady_state_mfu:.2f}")
+print(f"total_tokens_M:         {total_tokens / 1e6:.1f}")
+print(f"num_steps:              {step}")
+print(f"num_params_M:           {num_params / 1e6:.1f}")
+print(f"depth:                  {DEPTH}")

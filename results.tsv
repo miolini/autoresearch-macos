@@ -1,1 +1,1 @@
-commit	val_bpb	memory_gb	status	description
+commit	compression_score	compression_ratio	val_bpb_delta	compressed_bpb	status	description
