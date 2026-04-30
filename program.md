@@ -68,7 +68,10 @@ costs you 0.1 of compression ratio — pick that tradeoff carefully.
 
 ## What you CANNOT do
 
-- Modify `prepare.py` or `evaluate_bpb`. The eval is the ground truth.
+- Modify the eval logic in `prepare.py` (`evaluate_bpb`, `make_dataloader`,
+  `MAX_SEQ_LEN`, `EVAL_TOKENS`, the BPE tokenizer, or any training-data
+  prep code). The eval is the ground truth. The device-detection helper
+  at the top of the file is infrastructure, not eval — leave it alone too.
 - Modify the training loop, model architecture, optimizer, or hyperparameters
   (those are not the research question — the model is just a frozen substrate
   for testing compression). If a run crashes during training, fix the
@@ -194,8 +197,41 @@ revert, move on.
 
 **NEVER STOP, NEVER ASK FOR PERMISSION**: Once the loop has begun, do NOT
 pause to ask "should I continue?" or "is this a good stopping point?" or
-"do you want me to try X?". You are fully autonomous. The human might be
-asleep. Run until manually interrupted, period.
+"do you want me to try X?" or "shall I proceed?" or "is this acceptable?".
+The agent is fully autonomous, running unattended on a remote GPU box
+(typically a RunPod RTX 4090). The human is asleep / not at the keyboard.
+
+Specifically:
+- Do NOT ask "should I keep going?" — yes, always.
+- Do NOT ask "should I try X next?" — just try it.
+- Do NOT ask "what compression direction would you like to focus on?" — pick
+  from the compression-directions list and run it.
+- Do NOT ask for confirmation before `git commit`, `git reset --hard`, or
+  destructive operations on the experiment branch — they're expected.
+- Do NOT pause to tell the human a long summary mid-loop — write findings
+  into paper.md and results.tsv and keep iterating.
+
+If you genuinely run out of ideas, do NOT stop — re-read the
+"Compression directions" list, look at near-miss experiments and try
+combinations, attempt a more radical approach (learned hashing, attention-
+score-driven eviction, layer-wise mixed precision, KV-key-only compression
+with V-full, etc.). The loop runs until the human stops it, period.
+
+### Environment notes
+
+- The default substrate model is auto-selected by `train.py` based on the
+  detected device. On CUDA (RunPod) it uses a 6-layer / 384-dim / batch=16
+  setup (~50M params, fits in 24 GB). On Apple Silicon it falls back to a
+  smaller 3-layer / 192-dim / batch=4 setup. You should NOT change the
+  device-auto-scaling logic itself; it's part of the framework, not the
+  research question.
+- Wall time per experiment on a 4090 is roughly 5 min (training) + 30 s
+  (eval, two passes) ≈ 6 min. Plan ~10 experiments / hour, ~80 / overnight.
+- If `uv run train.py` exits non-zero, treat it as a `crash` row in the TSV
+  and revert. Common causes: NaN in attention from too-aggressive
+  quantization (try a less aggressive variant), shape mismatch in the
+  compressor (fix the bug, retry), or OOM (reduce DEVICE_BATCH_SIZE inline
+  but commit it as part of that experiment).
 
 If you run out of ideas: re-read the "Compression directions" list above,
 look at near-miss experiments and try combining them, attempt a more radical

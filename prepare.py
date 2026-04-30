@@ -23,16 +23,22 @@ import rustbpe
 import tiktoken
 import torch
 
-def verify_macos_env():
-    import sys
-    if sys.platform != "darwin":
-        raise RuntimeError(f"This script requires macOS with Metal. Detected platform: {sys.platform}")
-    if not torch.backends.mps.is_available():
-        raise RuntimeError("MPS (Metal Performance Shaders) is not available. Ensure you are running on Apple Silicon with a compatible PyTorch build.")
-    print("Environment verified: macOS detected with Metal (MPS) hardware acceleration available.")
+def verify_env():
+    """Accept CUDA, MPS, or CPU as a fallback. Print the chosen device.
+    The eval logic below is device-agnostic — only the device choice matters.
+    """
+    if torch.cuda.is_available():
+        gpu_name = torch.cuda.get_device_name(0)
+        vram_gb = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
+        print(f"Environment verified: CUDA detected — {gpu_name} ({vram_gb:.1f} GB VRAM).")
+    elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        print("Environment verified: macOS / Apple Silicon (MPS) hardware acceleration available.")
+    else:
+        print("WARNING: no CUDA or MPS device — using CPU. Data prep is fine on CPU; "
+              "training will be very slow.")
     print()
 
-verify_macos_env()
+verify_env()
 
 # ---------------------------------------------------------------------------
 # Constants (fixed, do not modify)
@@ -304,7 +310,12 @@ def make_dataloader(tokenizer, B, T, split, buffer_size=1000):
         doc_buffer.extend(token_lists)
 
     # Detect device
-    device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
+    if torch.cuda.is_available():
+        device = "cuda"
+    elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        device = "mps"
+    else:
+        device = "cpu"
 
     # Pre-allocate buffers: [inputs (B*T) | targets (B*T)]
     row_buffer = torch.empty((B, row_capacity), dtype=torch.long)

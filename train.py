@@ -17,15 +17,28 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-def verify_macos_env():
-    if sys.platform != "darwin":
-        raise RuntimeError(f"This script requires macOS with Metal. Detected platform: {sys.platform}")
-    if not torch.backends.mps.is_available():
-        raise RuntimeError("MPS (Metal Performance Shaders) is not available. Ensure you are running on Apple Silicon with a compatible PyTorch build.")
-    print("Environment verified: macOS detected with Metal (MPS) hardware acceleration available.")
-    print()
+def verify_env():
+    """Accept CUDA (Linux/Windows GPU), MPS (Apple Silicon), or CPU as a last resort.
 
-verify_macos_env()
+    Returns the device string that was selected.
+    """
+    if torch.cuda.is_available():
+        gpu_name = torch.cuda.get_device_name(0)
+        vram_gb = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
+        print(f"Environment verified: CUDA detected — {gpu_name} ({vram_gb:.1f} GB VRAM).")
+        print()
+        return "cuda"
+    # mps may not exist on Linux torch builds — guard the attribute lookup
+    if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        print("Environment verified: macOS / Apple Silicon (MPS) hardware acceleration available.")
+        print()
+        return "mps"
+    print("WARNING: no CUDA or MPS device found — falling back to CPU. "
+          "Training will be very slow; the autoresearch loop is meant for GPU.")
+    print()
+    return "cpu"
+
+DEVICE_TYPE = verify_env()
 
 from prepare import MAX_SEQ_LEN, TIME_BUDGET, Tokenizer, make_dataloader, evaluate_bpb
 
@@ -938,26 +951,38 @@ class MuonAdamW(torch.optim.Optimizer):
 # Hyperparameters (edit these directly, no CLI flags needed)
 # ---------------------------------------------------------------------------
 
-# Model architecture
-ASPECT_RATIO = 40       # model_dim = depth * ASPECT_RATIO (increased from 32 for better capacity)
+# Model architecture & training defaults — auto-scaled per device.
+#
+# The substrate is small but representative; on CUDA we scale up so eval
+# noise shrinks and the substrate is closer to "real" deployable models.
+# On MPS we stay small so Apple Silicon laptops don't crash. CUDA preset
+# is tuned for a single 24GB GPU (e.g. RunPod RTX 4090).
 HEAD_DIM = 96           # target head dimension for attention
 WINDOW_PATTERN = "L"    # sliding window pattern: L=full, S=half context
 
-# Optimization
-TOTAL_BATCH_SIZE = 2**14 # ~16K tokens per optimizer step
-EMBEDDING_LR = 0.8      # increased from 0.6 for faster learning
-UNEMBEDDING_LR = 0.005  # increased from 0.004
-MATRIX_LR = 0.05        # increased from 0.04
-SCALAR_LR = 0.6         # increased from 0.5
-WEIGHT_DECAY = 0.15     # reduced from 0.2 for less regularization
+# Optimization (shared across devices)
+EMBEDDING_LR = 0.8       # learning rate for token embeddings (Adam)
+UNEMBEDDING_LR = 0.005   # learning rate for lm_head (Adam)
+MATRIX_LR = 0.05         # learning rate for matrix parameters (Muon)
+SCALAR_LR = 0.6          # learning rate for per-layer scalars (Adam)
+WEIGHT_DECAY = 0.15      # cautious weight decay for Muon
 ADAM_BETAS = (0.8, 0.95) # Adam beta1, beta2
-WARMUP_RATIO = 0.0      # fraction of time budget for LR warmup
-WARMDOWN_RATIO = 0.5    # fraction of time budget for LR warmdown
-FINAL_LR_FRAC = 0.0     # final LR as fraction of initial
+WARMUP_RATIO = 0.0       # fraction of time budget for LR warmup
+WARMDOWN_RATIO = 0.5     # fraction of time budget for LR warmdown
+FINAL_LR_FRAC = 0.0      # final LR as fraction of initial
 
-# Model size
-DEPTH = 3               # increased from 2 to 3 layers
-DEVICE_BATCH_SIZE = 4   # keep batch size same
+if DEVICE_TYPE == "cuda":
+    # 24GB-class GPU defaults: bigger substrate, larger batch.
+    ASPECT_RATIO     = 64
+    DEPTH            = 6
+    DEVICE_BATCH_SIZE = 16
+    TOTAL_BATCH_SIZE  = 2**17    # ~131K tokens / optimizer step
+else:
+    # Apple Silicon / CPU — small enough to fit in 8-16 GB unified memory.
+    ASPECT_RATIO     = 40
+    DEPTH            = 3
+    DEVICE_BATCH_SIZE = 4
+    TOTAL_BATCH_SIZE  = 2**14    # ~16K tokens / optimizer step
 
 # ---------------------------------------------------------------------------
 # Setup: tokenizer, model, optimizer, dataloader
@@ -969,8 +994,8 @@ if torch.cuda.is_available():
     torch.cuda.manual_seed(42)
 torch.set_float32_matmul_precision("high")
 
-# Detect device
-device_type = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
+# Reuse the device picked by verify_env() at startup
+device_type = DEVICE_TYPE
 device = torch.device(device_type)
 
 # Autocast context

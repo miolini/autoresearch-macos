@@ -24,10 +24,9 @@ By design, training runs for a **fixed 5-minute time budget** (wall clock, exclu
 
 ## Quick start
 
-**Requirements:** Apple Silicon Mac (M1/M2/M3/M4 with Metal/MPS support) or a single NVIDIA GPU, Python 3.10+, [uv](https://docs.astral.sh/uv/).
+**Requirements:** Apple Silicon Mac (M1/M2/M3/M4 with Metal/MPS support) **or** a single NVIDIA GPU (Linux + CUDA — e.g. a RunPod RTX 4090), Python 3.10+, [uv](https://docs.astral.sh/uv/).
 
 ```bash
-
 # 1. Install uv project manager (if you don't already have it)
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
@@ -43,7 +42,38 @@ uv run train.py
 
 If the above commands all work ok, your setup is working and you can go into autonomous research mode.
 
-**Platforms support**. This fork officially supports **macOS (Apple Silicon / MPS)** and CPU environments, while preserving the original NVIDIA GPU support. It removes the hardcoded dependency on FlashAttention-3, falling back to PyTorch's native Scaled Dot Product Attention (SDPA) with manual sliding window causal masking when needed. It also features MPS-specific optimizations (disabling unsupported `torch.compile` paths, lowering memory batch sizes for Metal bounds, and precisely casting optimizer states) allowing you to run autonomous research agents directly on your Mac!
+### Running on RunPod (or any Linux + CUDA box)
+
+The repo auto-detects CUDA and scales the substrate model up (DEPTH=6,
+n_embd=384, batch=16, ~50M params) so a 4090 / 24 GB GPU is well-utilized.
+
+```bash
+# 0. SSH into the pod and clone the repo
+git clone https://github.com/<you>/autoresearch-macos.git && cd autoresearch-macos
+
+# 1. One-shot bootstrap (uv + deps + CUDA check + prepare.py + sanity tests)
+bash setup_runpod.sh
+
+# 2. Run a single experiment by hand to verify (~5 min training + ~30 s eval)
+uv run train.py
+
+# 3. Launch Claude in fully autonomous "never ask permission" mode for the night
+bash run_overnight.sh                     # tails to overnight.log; auto-restarts on crash
+# or, equivalently, by hand:
+echo "Read program.md and run the autonomous loop." | claude \
+    --dangerously-skip-permissions \
+    --permission-mode acceptEdits \
+    --print
+```
+
+To install the `claude` CLI on the pod:
+```bash
+npm install -g @anthropic-ai/claude-code   # then `claude login` or set ANTHROPIC_API_KEY
+```
+
+You can also leave `claude` running on your laptop with the RunPod folder mounted via SSH — same effect, just less disconnection risk on the laptop side.
+
+**Platforms support**. This fork supports **CUDA (Linux/Windows NVIDIA GPU)**, **macOS (Apple Silicon / MPS)**, and CPU. The substrate model auto-scales per device (small on MPS, large on CUDA — see `train.py` hyperparameter block). FlashAttention-3 is replaced by PyTorch's native Scaled Dot Product Attention (SDPA) with manual sliding-window causal masking, so no kernel install is required. `torch.compile` is enabled on CUDA and disabled on MPS where it's still unstable.
 
 ## Running the agent
 
