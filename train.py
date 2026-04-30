@@ -1152,7 +1152,7 @@ val_bpb = baseline_bpb  # alias for backward-compat printing
 
 # 3) Agent's compression eval. Override the line below to test new compressors.
 #    Default is identity (so compression_ratio = 1.0 until you change it).
-agent_compressor = INTNSymPerTokPerHeadCompressor(config, n_bits=2)
+agent_compressor = HybridRecentFullOldQuantCompressor(config, recent=64, n_bits_old=2)
 with autocast_ctx:
     compressed_bpb, compressed_bpt = evaluate_with_compressor(
         model, tokenizer, DEVICE_BATCH_SIZE, agent_compressor)
