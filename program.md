@@ -168,7 +168,10 @@ d4e5f6g	0.000000	0.0	0.000000	0.000000	crash	int1 quant (NaN in attention)
 
 ## The experiment loop
 
-The experiment runs on a dedicated branch (e.g. `autoresearch/apr29`).
+The experiment runs on a dedicated branch (e.g. `autoresearch/apr29-kvcompress`,
+or `autoresearch/<date>-kvcompress` more generally — the `-kvcompress`
+suffix disambiguates this project from sibling autoresearch projects in
+adjacent repos that may share the same date tag).
 
 LOOP FOREVER:
 

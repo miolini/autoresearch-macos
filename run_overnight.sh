@@ -27,12 +27,13 @@ cd "$(dirname "$0")"
 
 LOG=overnight.log
 PROMPT='Hi — read program.md and continue the autonomous KV-cache compression
-research loop. We are on branch autoresearch/apr29 (or pick the most recent
-autoresearch/* branch if it exists); resume from the last commit, append to
-results.tsv, refresh figures with `uv run figures.py`, and update paper.md
-with significant findings as you go. NEVER STOP, NEVER ASK PERMISSION. The
-human is asleep. Keep iterating compressors (quantization variants,
-low-rank, eviction, hybrids) until interrupted.'
+research loop. We are on branch autoresearch/apr29-kvcompress (or the most
+recent autoresearch/*-kvcompress branch if a newer one exists); resume from
+the last commit, append to results.tsv, refresh figures with
+`uv run figures.py`, and update paper.md with significant findings as you go.
+NEVER STOP, NEVER ASK PERMISSION. The human is asleep. Keep iterating
+compressors (quantization variants, low-rank, eviction, hybrids) until
+interrupted.'
 
 if ! command -v claude >/dev/null 2>&1; then
     echo "claude CLI not found. Install with: npm install -g @anthropic-ai/claude-code"

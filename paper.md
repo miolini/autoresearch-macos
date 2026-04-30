@@ -325,8 +325,8 @@ substrate.
 
 ## Appendix A. Reproducibility
 
-All experiments are committed to the branch `autoresearch/apr29` of the
-repository. Each TSV row maps to a specific commit hash; checking out
+All experiments are committed to the branch `autoresearch/apr29-kvcompress`
+of the repository. Each TSV row maps to a specific commit hash; checking out
 that hash and running `uv run train.py` reproduces the exact compressor
 and metric values modulo MPS nondeterminism in the third decimal of bpb.
 
