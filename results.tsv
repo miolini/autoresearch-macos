@@ -6,3 +6,5 @@ commit	compression_score	compression_ratio	val_bpb_delta	compressed_bpb	status	d
 8a0c1b2	3.182674	3.2000	0.001733	1.503347	discard	int4 group_size=16 (overhead beat by vanilla int4)
 9b1d2c3	2.654981	2.6667	0.001169	1.514881	discard	int4 group_size=8 (overhead too high)
 ac2e3d4	3.683132	3.6923	0.000918	1.714273	discard	asymmetric int4 (better quality but more overhead)
+bd1e5f6	4.133966	6.0000	0.186603	2.107769	discard	random projection rank=32 (Johnson-Lindenstrauss, lossy)
+e588bfb	5.942022	6.1563	0.021429	1.922298	keep	hybrid recent=64 bf16 + old INT2 quant
