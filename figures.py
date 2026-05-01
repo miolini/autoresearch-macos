@@ -68,8 +68,8 @@ def family_of(name):
 
 
 def parse_row_substrate(desc):
-    """Extract substrate tag (small/medium/large) from description, or 'small_legacy' for old rows."""
-    m = re.search(r"\[(small|medium|large)", desc)
+    """Extract substrate tag (small/medium/large/hd64/hd128) from description, or 'small_legacy' for old rows."""
+    m = re.search(r"\[(small|medium|large|hd64|hd128)", desc)
     if m:
         return m.group(1)
     return "small_legacy"
@@ -218,6 +218,47 @@ def plot_substrate_sweep(rows, out_path):
     plt.close(fig)
 
 
+def plot_head_dim_sweep(rows, out_path):
+    """Compressor leaderboard across HEAD_DIM ∈ {64, 96, 128} at fixed depth.
+    Tests whether group-wise quantization wins at larger head_dim."""
+    HD_TAGS = ["hd64", "medium", "hd128"]
+    HD_LABELS = {"hd64": "HD=64", "medium": "HD=96", "hd128": "HD=128"}
+    by_name = {}
+    for r in rows:
+        if r["substrate"] not in HD_TAGS:
+            continue
+        by_name.setdefault(r["name"], {})[r["substrate"]] = r
+    common = [n for n, d in by_name.items() if len(d) >= 2]
+    if not common:
+        return
+    fig, (ax_d, ax_r) = plt.subplots(1, 2, figsize=(11, 4.5))
+    x_pos = {tag: i for i, tag in enumerate(HD_TAGS)}
+    for n in sorted(common):
+        d = by_name[n]
+        labels_in_order = [s for s in HD_TAGS if s in d]
+        xs = [x_pos[s] for s in labels_in_order]
+        ys_d = [d[s]["val_bpb_delta"] for s in labels_in_order]
+        ys_r = [d[s]["compression_ratio"] for s in labels_in_order]
+        c = FAMILY_COLORS.get(d[labels_in_order[0]]["family"], "#888888")
+        ax_d.plot(xs, ys_d, marker="o", lw=1.4, label=n[:24], c=c)
+        ax_r.plot(xs, ys_r, marker="o", lw=1.4, c=c)
+    for ax in (ax_d, ax_r):
+        ax.set_xticks(list(range(len(HD_TAGS))))
+        ax.set_xticklabels([HD_LABELS[t] for t in HD_TAGS])
+        ax.grid(alpha=0.25)
+    ax_d.axhline(0, c="black", lw=0.5)
+    ax_d.axhline(0.10, c="orange", lw=0.6, ls=":", label="Δ=0.10 keep gate")
+    ax_d.set_ylabel(r"$\Delta$val_bpb")
+    ax_r.set_ylabel("Compression ratio")
+    ax_d.set_title("Quality loss across head_dim (depth=6 fixed)")
+    ax_r.set_title("Compression ratio across head_dim (depth=6 fixed)")
+    ax_d.legend(loc="best", fontsize=7)
+    fig.suptitle("HEAD_DIM sweep at fixed depth — does group-wise quant win at large D?")
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=140)
+    plt.close(fig)
+
+
 def plot_score_trajectory(rows, out_path):
     fig, ax = plt.subplots(figsize=(9, 4.5))
     xs = list(range(1, len(rows) + 1))
@@ -280,8 +321,9 @@ if __name__ == "__main__":
     plot_substrate_pareto(rows, os.path.join(FIG_DIR, "pareto.png"))
     plot_family_pareto(rows, os.path.join(FIG_DIR, "family_pareto.png"), substrate="medium")
     plot_substrate_sweep(rows, os.path.join(FIG_DIR, "substrate_sweep.png"))
+    plot_head_dim_sweep(rows, os.path.join(FIG_DIR, "head_dim_sweep.png"))
     plot_score_trajectory(rows, os.path.join(FIG_DIR, "score_trajectory.png"))
     plot_method_comparison(rows, os.path.join(FIG_DIR, "method_comparison.png"))
     print(f"Wrote {len(rows)} rows -> "
           f"{FIG_DIR}/pareto.png, family_pareto.png, substrate_sweep.png, "
-          f"score_trajectory.png, method_comparison.png")
+          f"head_dim_sweep.png, score_trajectory.png, method_comparison.png")
