@@ -69,14 +69,27 @@ under different quality budgets without rerunning experiments.
     `q · k` dot-product (pre-softmax), while noise on V averages over
     softmax weights post-attention. Practical recommendation: when
     one bit must be sacrificed, take it from V before K.
-11. **Mixed K4 / V2 flips its verdict with substrate scale.** On the
-    small substrate `mixed_K4_V2` is lossy (Δ = 0.224, score ≪ INT4),
-    but on the large substrate it becomes the new **α20 leader** at
-    5.05× compression (Δ = 0.049, S(20) = 4.07, S(50) = 2.60). At
-    production scales, an aggressive 4-bit K + 2-bit V split is the
-    first compressor in our study to dominate vanilla INT4. The same
-    `head_dim · n_kv_head · depth` regime that makes INT2 viable
-    (Finding 2 of §3.3) makes V-side 2-bit quantization viable here.
+11. **Mixed K4 / V2's quality cost is depth-driven, not head-dim-driven.**
+    Across the three depth-scaled substrates (D=3, 6, 10 at fixed HD=96)
+    the `mixed_K4_V2` Δbpb falls monotonically: 0.224 (small) → 0.102
+    (medium, at the keep-gate boundary) → **0.049 (large, the new α20
+    leader at 5.05× compression, S(20) = 4.07, S(50) = 2.60)**. Holding
+    `DEPTH = 6` constant and varying `HEAD_DIM ∈ {64, 96, 128}` instead
+    leaves Δ flat in [0.10, 0.12], not below the gate; holding
+    `DEPTH = 10` constant and pushing `HEAD_DIM` from 96 → 128 leaves
+    the K4_V2 lead intact (Δ 0.049 → 0.047, S(20) 4.07 → 4.18). So the
+    crossover is *depth*-gated. At production scales, aggressive
+    4-bit K + 2-bit V is the first compressor in our study to dominate
+    vanilla INT4, but only on substrates with enough layers to absorb
+    the V-side noise.
+12. **K-vs-V asymmetry generalizes to scale and even widens.** At the
+    same byte budget (5.05× ratio) on the large substrate, swapping
+    `mixed_K4_V2` (Δ = 0.049) → `mixed_K2_V4` (Δ = 0.158) costs **3.2×
+    in quality**; on hd128_large the swap costs **3.7×** (0.047 →
+    0.172). Even when V can be 2-bit at scale, K cannot — the
+    `q · k` dot-product remains the precision-critical operation across
+    every substrate we tested. The recommended bit allocation is
+    therefore "spend bits on K first" at every scale we measured.
 
 We position these findings explicitly as **deployment-time guidance**:
 given a memory budget per token and a quality tolerance, the Pareto
@@ -462,12 +475,15 @@ observed for INT2 (Finding 2):
 | K=25 % | 0.82 | 0.67 | 0.59 |
 | K=50 % | 0.42 | 0.32 | 0.28 |
 | K=75 % | 0.15 | 0.10 | **0.093** |
+| K=85 % | — | 0.043 (α20=+0.31) | 0.044 (α20=+0.29) |
 
 At K=75 % on the large substrate, H2O for the first time clears the
-Δ < 0.10 quality gate at non-trivial retention (1.32× compression). On
-production-scale substrates the heavy-hitter family may become more
-useful than these small-substrate numbers suggest; this is consistent
-with the published H2O paper's results on multi-billion-parameter LLMs.
+Δ < 0.10 quality gate at non-trivial retention (1.32× compression);
+at K=85 % both medium and large reach positive S(α=20) (≈ +0.3) — but
+only at low ratio (~ 1.17×). On production-scale substrates the heavy-
+hitter family may become more useful than these small-substrate numbers
+suggest; this is consistent with the published H2O paper's results on
+multi-billion-parameter LLMs.
 
 This is a **substrate-property** observation, not a method-of-eviction
 indictment: we trained with full attention (`window_pattern = 'L'`),
@@ -563,13 +579,17 @@ findings carry the practical recommendation:
    restricted-Pareto leader on every substrate ≤ 26 M parameters in our
    sweep**, across α ∈ {10, 20, 50}. It is the safe default for serving a
    full-attention pre-trained model under a Δbpb < 0.10 quality gate.
-2. **At ≥ 139 M parameters (large substrate), `mixed_K4_V2` overtakes
-   INT4 at every α we report.** A 4-bit K + 2-bit V split delivers 5.05×
-   compression at Δbpb = 0.049, displacing INT4 (3.84×, Δ ≈ 0.002) on
-   the restricted Pareto front. The crossover is consistent with the
-   substrate-scale tolerance pattern (Finding 2: aggressive
-   quantization tolerates larger substrates) and with the K-vs-V
-   asymmetry in quantization noise (Finding 10).
+2. **At DEPTH ≥ 10 substrates, `mixed_K4_V2` overtakes INT4 at every
+   α we report.** A 4-bit K + 2-bit V split delivers 5.05–5.12×
+   compression at Δbpb ≈ 0.05, displacing INT4 (3.84–3.88×,
+   Δ ≈ 0.002) on the restricted Pareto front, on both
+   `large` (HD=96) and `hd128_large` (HD=128). The crossover is
+   *depth*-gated, not head-dim-gated (Finding 11): at fixed DEPTH=6,
+   `mixed_K4_V2` Δ stays in [0.10, 0.12] across HD ∈ {64, 96, 128}.
+   The K-vs-V asymmetry that motivates the split (Finding 10)
+   generalizes and even widens at scale: at the same byte budget on
+   large, swapping `mixed_K4_V2` → `mixed_K2_V4` triples Δbpb
+   (Finding 12).
 
 Group-wise quantization, asymmetric quantization, low-rank approximation,
 and every eviction variant we tested — sliding window, StreamingLLM
@@ -602,6 +622,16 @@ pre-trained model.
 All experiments are committed to the branch `autoresearch/apr29-kvcompress`.
 Each row of `results.tsv` is reproducible by checking out the
 corresponding commit and running `uv run train.py` on the same substrate.
+
+**Bit-exact compressor reproducibility.** During the H2O sweep we
+inadvertently re-ran `h2o_R64_K50pct` on the small substrate twice
+(commits `e672d7a` and `6de5ab7` in `results.tsv`). Both runs reported
+Δbpb = 0.415736 to six decimal places — bit-exact reproduction of the
+compressor and eval pipeline given a cached substrate. The CUDA-
+nondeterminism floor mentioned in §5 (~ 5 × 10⁻⁴) is therefore an upper
+bound on the noise; on this substrate the eval is fully deterministic
+once the model file is fixed. Rows differing by less than this floor
+across separate substrate trainings should be regarded as ties.
 
 ## Appendix B. Honest byte accounting (closed-form per compressor)
 
