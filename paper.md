@@ -82,14 +82,25 @@ under different quality budgets without rerunning experiments.
     4-bit K + 2-bit V is the first compressor in our study to dominate
     vanilla INT4, but only on substrates with enough layers to absorb
     the V-side noise.
-12. **K-vs-V asymmetry generalizes to scale and even widens.** At the
-    same byte budget (5.05× ratio) on the large substrate, swapping
-    `mixed_K4_V2` (Δ = 0.049) → `mixed_K2_V4` (Δ = 0.158) costs **3.2×
-    in quality**; on hd128_large the swap costs **3.7×** (0.047 →
-    0.172). Even when V can be 2-bit at scale, K cannot — the
-    `q · k` dot-product remains the precision-critical operation across
-    every substrate we tested. The recommended bit allocation is
-    therefore "spend bits on K first" at every scale we measured.
+12. **K-vs-V asymmetry generalizes to scale and even widens.** Across
+    two large-substrate variants (HD=96, HD=128) and two byte budgets
+    (5.05× ratio for K=4/V=2, 3.10× ratio for K=8/V=2), we measured the
+    cost of swapping K and V bit-widths at the *same* byte budget:
+
+    | Substrate | Ratio | K-high Δ | V-high Δ | K-bit penalty |
+    |---|---|---|---|---|
+    | large (HD=96)        | 5.05× | K4_V2: 0.049 | K2_V4: 0.158 | **3.2×** |
+    | hd128_large (HD=128) | 5.12× | K4_V2: 0.047 | K2_V4: 0.172 | **3.7×** |
+    | large (HD=96)        | 3.10× | K8_V2: 0.047 | K2_V8: 0.157 | **3.3×** |
+    | hd128_large (HD=128) | 3.12× | K8_V2: 0.045 | K2_V8: 0.171 | **3.8×** |
+
+    Even when V can be 2-bit at scale, K cannot — the `q · k` dot-
+    product remains the precision-critical operation across every
+    substrate we tested. The penalty is also remarkably consistent
+    across byte budget (3.2–3.8×), suggesting it is a structural
+    property of attention rather than a quantization-noise artifact.
+    The recommended bit allocation is therefore "spend bits on K first"
+    at every scale we measured.
 
 We position these findings explicitly as **deployment-time guidance**:
 given a memory budget per token and a quality tolerance, the Pareto
@@ -693,6 +704,11 @@ separately in §B.2.b.
 | Top-k 25% (k=512) | `(512/2048)·1536 + (512·11)/(8·2048) = 384.34` | 384.34 | 0 |
 | Top-k 50% (k=1024) | `768 + 0.69 = 768.69` | 768.69 | 0 |
 | Top-k 75% (k=1536) | `1152 + 1.03 = 1153.03` | 1153.03 | 0 |
+| H2O R=64 K=25% | `(560/2048)·1536 + (496·11)/(8·2048) = 420.33` | 420.33 | 0 |
+| H2O R=64 K=50% | `(1056/2048)·1536 + (992·11)/(8·2048) = 792.67` | 792.67 | 0 |
+| H2O R=64 K=75% | `(1552/2048)·1536 + (1488·11)/(8·2048) = 1165.00` | 1165.00 | 0 |
+| H2O R=64 K=85% | `(1750/2048)·1536 + (1686·11)/(8·2048) = 1313.63` | 1313.63 | 0 |
+| H2O R=64 K=90% | `(1850/2048)·1536 + (1786·11)/(8·2048) = 1388.70` | 1388.70 | 0 |
 | SVD r=8 | `4·8 = 32` | 32.00 | 0 |
 | SVD r=16 | `4·16 = 64` | 64.00 | 0 |
 | SVD r=32 | `4·32 = 128` | 128.00 | 0 |
