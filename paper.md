@@ -62,6 +62,13 @@ under different quality budgets without rerunning experiments.
    per-Δ penalty. We therefore report `S(20)` as the primary leaderboard
    metric and require `Δ < 0.10` for "kept" status; the full triple
    `(S(10), S(20), S(50))` is in `results.tsv`.
+10. **K needs more precision than V.** Mixed precision `K8_V4`
+    (Δ = 1.25 × 10⁻³) outperforms `K4_V8` (Δ = 2.23 × 10⁻³) at the
+    same byte budget, confirming the asymmetry literature on KV-cache
+    quantization (KIVI). Quantization noise on K compounds at the
+    `q · k` dot-product (pre-softmax), while noise on V averages over
+    softmax weights post-attention. Practical recommendation: when
+    one bit must be sacrificed, take it from V before K.
 
 We position these findings explicitly as **deployment-time guidance**:
 given a memory budget per token and a quality tolerance, the Pareto
@@ -238,10 +245,20 @@ our substrate (head_dim = 96), at INT4:
   ≈ 0.001. Loses on every α.
 
 Across small/medium/large, the same ordering holds: vanilla INT4
-strictly dominates `g=16` and `g=8` on `S(20)` and `S(50)`. The
-hypothesis that group-wise wins emerge at larger `head_dim` is
-neither confirmed nor refuted here; it requires a `head_dim` sweep
-(constant 96 across our substrate sweep).
+strictly dominates `g=16` and `g=8` on `S(20)` and `S(50)`.
+
+**`head_dim` sweep at the medium substrate.** To test the hypothesis
+that group-wise wins emerge at *larger* `head_dim` (where the per-group
+scale storage is a smaller fraction of data storage), we retrain
+medium-depth substrates at `HEAD_DIM ∈ {64, 96, 128}`. INT4_g32 at
+`HD = 64` (D/G = 2) is the closest group-wise variant to ever match
+vanilla INT4: ratio 3.56× vs 3.76×, Δ improves by 0.0009 — still a
+20 % storage cost for a 0.1 ‰ quality bump. Vanilla per-(token, head)
+INT4 dominates group-wise at every `(head_dim, group_size)` we
+tested. The "group wins at larger head_dim" hypothesis from the
+quantization literature is **not supported** at our scales — the
+overhead from one BF16 scale per group plus the `D/G` ratio of scales
+to elements is too large at INT4 to amortize away.
 
 ### 4.2 Recency bias and the hybrid frontier — scale dependence
 

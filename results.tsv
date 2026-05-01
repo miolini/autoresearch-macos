@@ -62,3 +62,4 @@ PENDING	0.000000	0.0000	0.000000	0.000000	marker	===== HEAD_DIM=64 sweep at medi
 0209f92	1.939154	1.9394	0.000024	1.098444	discard	int8_sym_per_tok_per_head [hd64 bpt=792.00 α20=1.938915 α50=1.938196]
 0209f92	3.917127	7.1111	0.319398	1.417818	discard	int2_sym_per_tok_per_head [hd64 bpt=216.00 α20=0.723142 α50=-8.858811]
 PENDING	0.000000	0.0000	0.000000	0.000000	marker	===== HEAD_DIM=128 sweep at medium (D=6 A=64) =====
+5200e5d	3.840911	3.8788	0.003788	1.099647	keep	int4_sym_per_tok_per_head [hd128 bpt=396.00 α20=3.803033 α50=3.689401]
