@@ -1223,6 +1223,7 @@ else:
 DEPTH         = int(os.environ.get("DEPTH", DEPTH))
 ASPECT_RATIO  = int(os.environ.get("ASPECT_RATIO", ASPECT_RATIO))
 DEVICE_BATCH_SIZE = int(os.environ.get("DEVICE_BATCH_SIZE", DEVICE_BATCH_SIZE))
+HEAD_DIM      = int(os.environ.get("HEAD_DIM", HEAD_DIM))
 COMPRESSOR_NAME = os.environ.get("COMPRESSOR", "hybrid_R64_int2")
 TRAIN_CACHE   = int(os.environ.get("TRAIN_CACHE", "1"))  # 1 = reuse cached model
 
