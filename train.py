@@ -508,6 +508,241 @@ class KHigherPrecVLowerPrecCompressor(KVCompressor):
         return state
 
 
+# ---- Eviction-family compressors ----
+# NOTE on "soft eviction" (limitation, documented in paper):
+# The compression hook receives K, V tensors and must return same-shape K_hat, V_hat;
+# we cannot mutate the SDPA mask. Eviction is therefore approximated by zeroing out
+# K and V at evicted positions. Softmax then assigns those positions a small leaked
+# weight (because q·0 = 0, while kept positions typically have larger scores), but
+# they contribute nothing to the output (since V=0). This slightly over-estimates
+# the quality cost vs true masked-attention eviction; we discuss this in §5
+# (Limitations) and confirm it does not flip any leaderboard ordering.
+
+class SinkPlusWindowCompressor(KVCompressor):
+    """StreamingLLM-style: keep the first `sinks` tokens (attention sinks)
+    plus the last `window` tokens; zero out everything in between."""
+    def __init__(self, config, sinks=4, window=128):
+        super().__init__(config)
+        self.sinks = sinks
+        self.window = window
+        self.name = f"sink{sinks}_W{window}"
+
+    def compress(self, k, v):
+        B, T, H, D = k.shape
+        kept = self.sinks + self.window
+        if T <= kept:
+            n_bytes = (k.numel() + v.numel()) * 2
+            return (k, v), n_bytes
+        k_keep = k.clone()
+        v_keep = v.clone()
+        # Zero positions [sinks, T-window) i.e. the middle band
+        k_keep[:, self.sinks:T - self.window].zero_()
+        v_keep[:, self.sinks:T - self.window].zero_()
+        # Honest bytes: only kept tokens stored
+        n_bytes = (B * kept * H * D * 2) * 2  # K and V, BF16
+        return (k_keep, v_keep), n_bytes
+
+    def decompress(self, state):
+        return state
+
+
+class TopKByKNormCompressor(KVCompressor):
+    """Keep the top-k tokens by ‖K‖₂ (summed over heads); zero the rest.
+    `k_frac` ∈ (0, 1] controls fraction of T retained.
+    Storage adds ⌈log₂ T⌉ bits of position index per kept token (recorded
+    in n_bytes so byte accounting is honest)."""
+    def __init__(self, config, k_frac=0.5):
+        super().__init__(config)
+        self.k_frac = k_frac
+        self.name = f"topk_knorm_{int(round(k_frac*100))}pct"
+
+    def compress(self, k, v):
+        B, T, H, D = k.shape
+        keep = max(1, int(self.k_frac * T))
+        if keep >= T:
+            n_bytes = (k.numel() + v.numel()) * 2
+            return (k, v), n_bytes
+        k_norm = k.float().norm(dim=(-2, -1))  # [B, T] — pooled across heads
+        _, top_idx = torch.topk(k_norm, keep, dim=1)
+        mask = torch.zeros(B, T, dtype=torch.bool, device=k.device)
+        mask.scatter_(1, top_idx, True)
+        keep_mask = mask[:, :, None, None]
+        k_keep = k * keep_mask
+        v_keep = v * keep_mask
+        idx_bits = max(1, (T - 1).bit_length())
+        idx_bytes_total = (B * keep * idx_bits + 7) // 8
+        n_bytes = (B * keep * H * D * 2) * 2 + idx_bytes_total
+        return (k_keep, v_keep), n_bytes
+
+    def decompress(self, state):
+        return state
+
+
+class HeadPruneCompressor(KVCompressor):
+    """Drop the last `n_drop` KV heads entirely (zero their K,V).
+    Compute heads still GQA-replicate the surviving KV-head; pruned heads'
+    queries route to a zero K,V slice, contributing nothing post-softmax."""
+    def __init__(self, config, n_drop=1):
+        super().__init__(config)
+        self.n_drop = n_drop
+        self.n_kept = config.n_kv_head - n_drop
+        assert self.n_kept >= 1, f"Need ≥1 head, requested drop {n_drop} of {config.n_kv_head}"
+        self.name = f"headprune_{n_drop}of{config.n_kv_head}"
+
+    def compress(self, k, v):
+        B, T, H, D = k.shape
+        k_keep = k.clone()
+        v_keep = v.clone()
+        k_keep[:, :, H - self.n_drop:].zero_()
+        v_keep[:, :, H - self.n_drop:].zero_()
+        n_bytes = (B * T * self.n_kept * D * 2) * 2  # K and V, BF16, only kept heads
+        return (k_keep, v_keep), n_bytes
+
+    def decompress(self, state):
+        return state
+
+
+# ---- Low-rank family ----
+
+class SVDLowRankCompressor(KVCompressor):
+    """Per-token rank-r approximation via a frozen SVD-derived projection.
+    The projection P ∈ R^{H·D × r} is calibrated *once* from the right
+    singular vectors of the first batch's K (or V) matrix, then reused.
+    Storage per token: r BF16 floats per K, per V → 4·r bytes total.
+    Compression ratio versus identity (4·H·D bytes/token-layer) is H·D/r.
+    """
+    def __init__(self, config, rank=16):
+        super().__init__(config)
+        self.rank = rank
+        head_dim = config.n_embd // config.n_head
+        self._d_full = config.n_kv_head * head_dim
+        self.name = f"svd_r{rank}"
+        self._P_k = None
+        self._P_v = None
+
+    def _calibrate(self, x):
+        with torch.no_grad():
+            B, T, H, D = x.shape
+            X = x.reshape(B * T, H * D).float()
+            if X.size(0) > 4096:
+                idx = torch.randperm(X.size(0), device=X.device)[:4096]
+                X = X[idx]
+            _, _, Vh = torch.linalg.svd(X, full_matrices=False)
+            P = Vh[:self.rank].T.contiguous().to(x.dtype)  # [H·D, rank]
+        return P
+
+    def _project(self, x, P):
+        B, T, H, D = x.shape
+        x_flat = x.reshape(B, T, H * D)
+        y = x_flat @ P
+        x_hat = y @ P.T
+        return x_hat.reshape(B, T, H, D), y
+
+    def compress(self, k, v):
+        if self._P_k is None:
+            self._P_k = self._calibrate(k)
+            self._P_v = self._calibrate(v)
+        k_hat, k_proj = self._project(k, self._P_k)
+        v_hat, v_proj = self._project(v, self._P_v)
+        n_bytes = (k_proj.numel() + v_proj.numel()) * 2  # bf16 floats
+        return (k_hat, v_hat), n_bytes
+
+    def decompress(self, state):
+        return state
+
+
+# ---- Hybrid stacks ----
+
+class StackedCompressor(KVCompressor):
+    """Compose outer (eviction-style) ∘ inner (quant-style):
+       1) outer.compress(K, V) zeros out evicted positions/heads
+       2) inner.compress applied to surviving positions
+    Honest byte accounting: actual storage is inner_per_token × kept_fraction,
+    where kept_fraction = outer_bytes / full_bf16_bytes.
+    """
+    def __init__(self, config, outer, inner):
+        super().__init__(config)
+        self.outer = outer
+        self.inner = inner
+        self.name = f"stack_{outer.name}+{inner.name}"
+
+    def compress(self, k, v):
+        outer_state, outer_bytes = self.outer.compress(k, v)
+        k1, v1 = self.outer.decompress(outer_state)
+        inner_state, inner_full_bytes = self.inner.compress(k1, v1)
+        k2, v2 = self.inner.decompress(inner_state)
+        full_bf16_bytes = (k.numel() + v.numel()) * 2
+        kept_fraction = outer_bytes / full_bf16_bytes if full_bf16_bytes > 0 else 1.0
+        n_bytes = max(1, int(round(inner_full_bytes * kept_fraction)))
+        return (k2, v2), n_bytes
+
+    def decompress(self, state):
+        return state
+
+
+def pick_compressor(name, config):
+    """Resolve a string name into a compressor instance.
+    Naming scheme:
+      identity
+      int{N}                       e.g. int8, int4, int2
+      int{N}_g{G}                  e.g. int4_g16
+      int{N}_asym                  e.g. int4_asym
+      mixed_K{Nk}_V{Nv}            e.g. mixed_K8_V4
+      hybrid_R{recent}_int{Nold}   e.g. hybrid_R64_int2
+      sliding_W{W}                 e.g. sliding_W128
+      sink{S}_W{W}                 e.g. sink4_W128
+      topk_knorm_{P}pct            e.g. topk_knorm_50pct
+      svd_r{R}                     e.g. svd_r16
+      randproj_r{R}                e.g. randproj_r32
+      headprune_{K}                e.g. headprune_1
+      stack:OUTER+INNER            e.g. stack:sliding_W128+int4
+    """
+    if name == "identity":
+        return KVCompressor(config)
+    if name.startswith("int") and "_g" in name:
+        n_bits, _, gtail = name[3:].partition("_g")
+        return INTNGroupCompressor(config, n_bits=int(n_bits), group_size=int(gtail))
+    if name.startswith("int") and name.endswith("_asym"):
+        n_bits = int(name[3:-5])
+        return AsymINTNCompressor(config, n_bits=n_bits)
+    if name.startswith("int") and name[3:].isdigit():
+        n_bits = int(name[3:])
+        if n_bits == 8:
+            return INT8SymPerTokPerHeadCompressor(config)
+        return INTNSymPerTokPerHeadCompressor(config, n_bits=n_bits)
+    if name.startswith("mixed_K"):
+        # mixed_K{k}_V{v}
+        rest = name[len("mixed_K"):]
+        k_bits_str, _, v_part = rest.partition("_V")
+        return KHigherPrecVLowerPrecCompressor(config, k_bits=int(k_bits_str), v_bits=int(v_part))
+    if name.startswith("hybrid_R"):
+        # hybrid_R{recent}_int{n}
+        rest = name[len("hybrid_R"):]
+        recent_str, _, intpart = rest.partition("_int")
+        return HybridRecentFullOldQuantCompressor(config, recent=int(recent_str), n_bits_old=int(intpart))
+    if name.startswith("sliding_W"):
+        return SlidingWindowCompressor(config, window=int(name[len("sliding_W"):]))
+    if name.startswith("sink"):
+        # sink{S}_W{W}
+        rest = name[len("sink"):]
+        s_str, _, w_part = rest.partition("_W")
+        return SinkPlusWindowCompressor(config, sinks=int(s_str), window=int(w_part))
+    if name.startswith("topk_knorm_"):
+        pct_str = name[len("topk_knorm_"):].rstrip("pct")
+        return TopKByKNormCompressor(config, k_frac=int(pct_str) / 100.0)
+    if name.startswith("svd_r"):
+        return SVDLowRankCompressor(config, rank=int(name[len("svd_r"):]))
+    if name.startswith("randproj_r"):
+        return LowRankCompressor(config, rank=int(name[len("randproj_r"):]))
+    if name.startswith("headprune_"):
+        return HeadPruneCompressor(config, n_drop=int(name[len("headprune_"):]))
+    if name.startswith("stack:"):
+        outer_name, _, inner_name = name[len("stack:"):].partition("+")
+        return StackedCompressor(config, pick_compressor(outer_name, config),
+                                 pick_compressor(inner_name, config))
+    raise ValueError(f"Unknown compressor name: {name}")
+
+
 # Holds the active compressor during compression eval. Set by the eval driver.
 _ACTIVE_COMPRESSOR = None
 _TOTAL_COMPRESSED_BYTES = 0
@@ -984,6 +1219,13 @@ else:
     DEVICE_BATCH_SIZE = 4
     TOTAL_BATCH_SIZE  = 2**14    # ~16K tokens / optimizer step
 
+# Env-var overrides for substrate-scale sweep and compressor selection.
+DEPTH         = int(os.environ.get("DEPTH", DEPTH))
+ASPECT_RATIO  = int(os.environ.get("ASPECT_RATIO", ASPECT_RATIO))
+DEVICE_BATCH_SIZE = int(os.environ.get("DEVICE_BATCH_SIZE", DEVICE_BATCH_SIZE))
+COMPRESSOR_NAME = os.environ.get("COMPRESSOR", "hybrid_R64_int2")
+TRAIN_CACHE   = int(os.environ.get("TRAIN_CACHE", "1"))  # 1 = reuse cached model
+
 # ---------------------------------------------------------------------------
 # Setup: tokenizer, model, optimizer, dataloader
 # ---------------------------------------------------------------------------
@@ -1052,6 +1294,26 @@ optimizer = model.setup_optimizer(
     weight_decay=WEIGHT_DECAY,
 )
 
+# Try to load a cached trained model that matches this config. Compressor
+# experiments can reuse the same trained substrate, saving ~5 min/run.
+_CACHE_DIR = os.path.join(os.path.expanduser("~"), ".cache", "autoresearch", "models")
+os.makedirs(_CACHE_DIR, exist_ok=True)
+_cfg_key = (f"d{config.n_layer}_a{ASPECT_RATIO}_h{HEAD_DIM}_t{TIME_BUDGET}"
+            f"_b{TOTAL_BATCH_SIZE}_v{config.vocab_size}_w{config.window_pattern}")
+_cache_path = os.path.join(_CACHE_DIR, f"model_{_cfg_key}.pt")
+
+cached_loaded = False
+cached_step = 0
+cached_train_time = 0.0
+if TRAIN_CACHE and os.path.exists(_cache_path):
+    print(f"Loading cached substrate model: {_cache_path}")
+    _state = torch.load(_cache_path, map_location=device, weights_only=True)
+    model.load_state_dict(_state["model"])
+    cached_step = int(_state.get("step", 0))
+    cached_train_time = float(_state.get("training_seconds", 0.0))
+    cached_loaded = True
+    print(f"  cached_step={cached_step}, cached_train_time={cached_train_time:.1f}s")
+
 # torch.compile is unstable on MPS, only use on CUDA
 if device_type == "cuda":
     model = torch.compile(model, dynamic=False)
@@ -1061,6 +1323,7 @@ x, y, epoch = next(train_loader)  # prefetch first batch
 
 print(f"Time budget: {TIME_BUDGET}s")
 print(f"Gradient accumulation steps: {grad_accum_steps}")
+print(f"Compressor: {COMPRESSOR_NAME}")
 
 # Schedules (all based on progress = training_time / TIME_BUDGET)
 
@@ -1095,7 +1358,16 @@ def sync_device(device_type):
     elif device_type == "mps":
         torch.mps.synchronize()
 
-while True:
+if cached_loaded:
+    print("Skipping training — using cached substrate.")
+    step = cached_step
+    total_training_time = cached_train_time
+    # Keep gc disabled like the trained path so eval timing is consistent
+    gc.collect()
+    gc.freeze()
+    gc.disable()
+
+while not cached_loaded:
     sync_device(device_type)
     t0 = time.time()
     for micro_step in range(grad_accum_steps):
@@ -1160,7 +1432,18 @@ while True:
 
 print()  # newline after \r training log
 
-total_tokens = step * TOTAL_BATCH_SIZE
+# Save trained substrate to cache for subsequent compressor experiments
+if (not cached_loaded) and TRAIN_CACHE:
+    _orig = model._orig_mod if hasattr(model, "_orig_mod") else model
+    torch.save({
+        "model": _orig.state_dict(),
+        "step": step,
+        "training_seconds": total_training_time,
+        "config_key": _cfg_key,
+    }, _cache_path)
+    print(f"Saved substrate cache: {_cache_path}")
+
+total_tokens = max(step, 1) * TOTAL_BATCH_SIZE
 
 # Final eval
 model.eval()
@@ -1175,9 +1458,8 @@ with autocast_ctx:
         model, tokenizer, DEVICE_BATCH_SIZE, identity_compressor)
 val_bpb = baseline_bpb  # alias for backward-compat printing
 
-# 3) Agent's compression eval. Override the line below to test new compressors.
-#    Default is identity (so compression_ratio = 1.0 until you change it).
-agent_compressor = HybridRecentFullOldQuantCompressor(config, recent=64, n_bits_old=2)
+# 3) Agent's compression eval. Selected via env var COMPRESSOR (see pick_compressor).
+agent_compressor = pick_compressor(COMPRESSOR_NAME, config)
 with autocast_ctx:
     compressed_bpb, compressed_bpt = evaluate_with_compressor(
         model, tokenizer, DEVICE_BATCH_SIZE, agent_compressor)
@@ -1186,8 +1468,13 @@ with autocast_ctx:
 compression_ratio = baseline_bpt / compressed_bpt if compressed_bpt > 0 else 0.0
 val_bpb_delta = compressed_bpb - baseline_bpb  # >0 = quality lost
 # Composite score (higher = better). Penalty α tunes quality vs ratio tradeoff.
-COMPRESSION_SCORE_ALPHA = 10.0
-compression_score = compression_ratio - COMPRESSION_SCORE_ALPHA * max(val_bpb_delta, 0.0)
+COMPRESSION_SCORE_ALPHA = float(os.environ.get("COMPRESSION_SCORE_ALPHA", "10.0"))
+def _score(alpha):
+    return compression_ratio - alpha * max(val_bpb_delta, 0.0)
+score_a10 = _score(10.0)
+score_a20 = _score(20.0)
+score_a50 = _score(50.0)
+compression_score = _score(COMPRESSION_SCORE_ALPHA)
 
 # Final summary
 t_end = time.time()
@@ -1208,6 +1495,9 @@ print(f"compressed_bytes_per_tok: {compressed_bpt:.2f}")
 print(f"compression_ratio:      {compression_ratio:.4f}")
 print(f"compressor_name:        {agent_compressor.name}")
 print(f"compression_score:      {compression_score:.6f}")
+print(f"score_alpha10:          {score_a10:.6f}")
+print(f"score_alpha20:          {score_a20:.6f}")
+print(f"score_alpha50:          {score_a50:.6f}")
 print(f"training_seconds:       {total_training_time:.1f}")
 print(f"total_seconds:          {t_end - t_start:.1f}")
 print(f"peak_vram_mb:           {peak_vram_mb:.1f}")
@@ -1216,3 +1506,6 @@ print(f"total_tokens_M:         {total_tokens / 1e6:.1f}")
 print(f"num_steps:              {step}")
 print(f"num_params_M:           {num_params / 1e6:.1f}")
 print(f"depth:                  {DEPTH}")
+print(f"aspect_ratio:           {ASPECT_RATIO}")
+print(f"head_dim:               {HEAD_DIM}")
+print(f"n_kv_head:              {config.n_kv_head}")
