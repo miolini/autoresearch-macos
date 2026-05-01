@@ -481,11 +481,15 @@ harness in `results.tsv`. Notation:
 | Hybrid recent-R bf16 + old INT-N | `(R/T) · 4 H D + ((T−R)/T) · (2⌈HDN/8⌉ + 4 H)` |
 | Stack: outer eviction × inner C | `(bpt(outer) / bpt(identity)) · bpt(inner)` |
 
-### B.2 Verification on the medium substrate (H=4, D=96, T=2048)
+### B.2.a Consistency check: closed-form ↔ implementation
 
-Predicted bpt vs measured bpt (from `results.tsv`). All match to 0 bytes
-except top-k indices, which match to ≤ 0.01 bytes (rounding noise from
-averaging over the batch).
+The table below verifies that the closed-form expressions in §B.1 match
+the `n_bytes` self-report from each compressor's `compress()` method,
+on the medium substrate (H=4, D=96, T=2048). **What this checks is the
+implementation: that the code we wrote sums up the exact bytes the
+formula prescribes.** Δ = 0 here is expected and required — it does
+*not* claim anything about the realized GPU memory, which is measured
+separately in §B.2.b.
 
 | Compressor | Predicted | Measured | Δ |
 |---|---|---|---|
@@ -514,6 +518,72 @@ averaging over the batch).
 | Stack sliding_W256 + INT4 | `(192/1536)·400 = 50` | 50.00 | 0 |
 | Stack sink4_W256 + INT4 | `(195/1536)·400 = 50.78` | 50.78 | 0 |
 | Stack headprune_1 + INT4 | `(1152/1536)·400 = 300` | 300.00 | 0 |
+
+### B.2.b Realized memory measurement (allocator overhead)
+
+The §B.2.a verification reports the *theoretical* byte cost — what a
+serving system would store *if* the cache could be packed exactly to
+the byte. In practice, `torch.cuda.memory_allocated()` differs because
+the NVIDIA caching allocator pads each tensor to a 512-byte alignment
+boundary. The realized cost is therefore at least the closed-form, and
+typically more for compressors that allocate many small auxiliary
+tensors (per-(B, T, H, 1) scales, zero-points, indices).
+
+We measure realized bpt with `measure_realized.py`, which allocates the
+exact cache representation each compressor would use (packed `uint8`
+data tensors of size `⌈H D N / 8⌉`, BF16 scales of size `[B, T, H, G]`,
+etc.) and reads `torch.cuda.memory_allocated()` before/after.
+
+**At decode-batch scale (B = 16, T = 2048, H = 4, D = 96):** every
+allocated tensor is many KB, so 512-byte alignment is invisible per
+token-layer. **Realized bpt = closed-form bpt for all compressors.**
+
+**At per-step / KV-cache-init scale (B = 1, T = 16, H = 4, D = 96):**
+small auxiliary tensors (e.g. INT4's `(1, 16, 4, 1)` BF16 scale = 128
+bytes, padded to 512) become visible:
+
+| Compressor | Closed-form | Realized | Δ bytes | Overhead |
+|---|---:|---:|---:|---:|
+| identity | 1536.0 | 1536.0 | 0.0 | 0.00 % |
+| int8 | 784.0 | 832.0 | +48.0 | +6.12 % |
+| int4 | 400.0 | 448.0 | +48.0 | +12.00 % |
+| int2 | 208.0 | 256.0 | +48.0 | +23.08 % |
+| int4_g8 | 576.0 | 576.0 | 0.0 | 0.00 % |
+| int4_g16 | 480.0 | 512.0 | +32.0 | +6.67 % |
+| int4_g32 | 432.0 | 448.0 | +16.0 | +3.70 % |
+| int4_asym | 416.0 | 512.0 | +96.0 | +23.08 % |
+| mixed_K8_V4 | 592.0 | 640.0 | +48.0 | +8.11 % |
+| mixed_K4_V2 | 304.0 | 352.0 | +48.0 | +15.79 % |
+| topk_knorm_25pct | 384.1 | 416.0 | +31.9 | +8.30 % |
+| topk_knorm_75pct | 1152.4 | 1184.0 | +31.6 | +2.74 % |
+| svd_r8 | 32.0 | 64.0 | +32.0 | +100.00 % |
+| svd_r16 | 64.0 | 64.0 | 0.0 | 0.00 % |
+| svd_r32 | 128.0 | 128.0 | 0.0 | 0.00 % |
+| sliding_W{64,128,256,512} | 1536.0 | 1536.0 | 0.0 | 0.00 % |
+| headprune_{1,2} | 1152 / 768 | 1152 / 768 | 0.0 | 0.00 % |
+
+(rows omitted: at B=1, T=16, sliding/sink/hybrid quantities are clamped
+to ≤ T tokens kept, so realized = closed-form trivially)
+
+Three observations:
+
+1. **Compressors with many small per-token auxiliary tensors** —
+   `int4_asym` (4 small per-(1, T, H, 1) scale + zero-point tensors),
+   `int2` (2 small scale tensors over a tiny packed data tensor) —
+   pay the highest alignment penalty (+23 %).
+2. **The penalty vanishes at production batch sizes.** At B = 16 / T = 2048,
+   the same compressors show 0 % overhead because each allocated tensor
+   is far above the 512-byte alignment boundary.
+3. **Low-rank methods are the worst case** at small B/T: `svd_r8` shows
+   100 % overhead because the BF16 rank-8 projection coefficient tensor
+   is `1 · 16 · 8 = 128` elements = 256 bytes, padded to 512.
+
+The serving implication is concrete: **at the start of a request
+(B = 1, KV cache empty), the *realized* compression ratio of the
+finest-grained quant variants is ~ 12–23 % worse than the headline
+number.** This effect amortizes away once the prefix grows past a few
+hundred tokens, but it is the kind of detail that matters when KV-cache
+budgets are tight and "compression ratio" is taken too literally.
 
 ### B.3 Counted artifacts and what is *not* counted
 
