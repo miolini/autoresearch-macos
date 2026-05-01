@@ -13,3 +13,5 @@ e588bfb	5.942022	6.1563	0.021429	1.922298	keep	hybrid recent=64 bf16 + old INT2 
 90aea70	1.958972	1.9592	0.000021	1.093180	keep	int8_sym_per_tok_per_head [medium bpt=784.00 α20=1.958761 α50=1.958128]
 90aea70	3.804338	3.8400	0.003566	1.096725	keep	int4_sym_per_tok_per_head [medium bpt=400.00 α20=3.768676 α50=3.661690]
 ba2844f	15.547822	32.0000	1.645218	2.738377	discard	sliding_window_64 [medium bpt=48.00 α20=-0.904 α50=-50.261] — α10 wins on ratio alone but quality cliff
+699997e	-7.077435	8.0000	1.507743	2.600902	discard	sliding_window_256 [medium bpt=192.00 α20=-22.154870 α50=-67.387174]
+699997e	-9.062370	4.0000	1.306237	2.399396	discard	sliding_window_512 [medium bpt=384.00 α20=-22.124740 α50=-61.311850]
