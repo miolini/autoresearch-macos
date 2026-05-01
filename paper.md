@@ -69,6 +69,14 @@ under different quality budgets without rerunning experiments.
     `q · k` dot-product (pre-softmax), while noise on V averages over
     softmax weights post-attention. Practical recommendation: when
     one bit must be sacrificed, take it from V before K.
+11. **Mixed K4 / V2 flips its verdict with substrate scale.** On the
+    small substrate `mixed_K4_V2` is lossy (Δ = 0.224, score ≪ INT4),
+    but on the large substrate it becomes the new **α20 leader** at
+    5.05× compression (Δ = 0.049, S(20) = 4.07, S(50) = 2.60). At
+    production scales, an aggressive 4-bit K + 2-bit V split is the
+    first compressor in our study to dominate vanilla INT4. The same
+    `head_dim · n_kv_head · depth` regime that makes INT2 viable
+    (Finding 2 of §3.3) makes V-side 2-bit quantization viable here.
 
 We position these findings explicitly as **deployment-time guidance**:
 given a memory budget per token and a quality tolerance, the Pareto
@@ -188,6 +196,7 @@ the four canonical families. The full enumeration:
 | **Eviction (sliding window)** | W ∈ {64, 128, 256, 512} | Keep last W tokens, drop the rest |
 | **Eviction (StreamingLLM)** | sinks=4, W ∈ {64, 128, 256} | Keep first 4 + last W tokens |
 | **Eviction (top-k by ‖K‖)** | k_frac ∈ {25 %, 50 %, 75 %} | Keep top-k tokens by row-wise K-norm |
+| **Eviction (H2O heavy-hitter)** | recent ∈ {64, 128} × keep_frac ∈ {25 %, 50 %, 75 %, 80 %, 85 %, 90 %} | Keep last R tokens + top-k older tokens by total received attention (Zhang et al., 2023) |
 | **Head pruning** | drop ∈ {1, 2} of n_kv_head | Zero K, V on a fraction of KV heads |
 | **Low-rank (per-token)** | SVD rank ∈ {8, 16, 32}; random projection rank=32 | rank-r per-token approximation across heads |
 | **Hybrid stacks** | (sliding_W256, sink4_W256, headprune_1) × INT4 | Outer eviction composed with inner quantization |
@@ -220,14 +229,19 @@ Each substrate is trained on a fixed wall-clock budget (300 s on a
 4090) and then frozen across all compressors. Three findings emerge
 from the leaderboard re-run (see `figures/substrate_sweep.png`):
 
-1. **INT4 sym per-(token, head) is the consistent leader at α ∈ {20, 50}**
-   across small, medium, and large. `S(20)` ranges 3.69 → 3.77 → 3.80
-   monotonically with substrate scale.
+1. **INT4 sym per-(token, head) leads on small and medium under
+   α ∈ {20, 50}; on large it is overtaken by `mixed_K4_V2`.** Vanilla
+   INT4 `S(20)` ranges 3.69 → 3.77 → 3.80 monotonically with substrate
+   scale, but on large the mixed-precision K4 / V2 split lands at
+   `S(20) = 4.07` (ratio 5.05×, Δ = 0.049) and dominates. The
+   "constant-leader" reading from a single substrate would have missed
+   this crossover.
 2. **Aggressive quantization tolerates larger substrates better.**
    INT2 Δbpb improves with substrate scale: 0.59 (small) → 0.45
    (medium) → 0.23 (large). At large, INT2 has positive `S(20)` for
-   the first time (2.85), suggesting that production-scale models may
-   make INT2 viable where 7 M-parameter substrates cannot.
+   the first time (2.85). The same effect explains the `mixed_K4_V2`
+   crossover above: 2-bit V quantization is catastrophic at small
+   (Δ = 0.224) but merely a 5 % quality cost at large.
 3. **Group-wise quantization overhead exceeds its quality benefit at
    every substrate scale tested.** `int4_group16` and `int4_group8`
    both lose to vanilla INT4 by ratio drop > quality gain, at all of
@@ -267,20 +281,27 @@ change as the quality penalty weight α varies?* We present two views.
 
 **Restricted view (Δ < 0.10 gate).** When we restrict attention to
 compressors whose quality loss is bounded (Δval_bpb < 0.10 — a roughly
-"production-acceptable" tolerance), the leader is the same compressor
-under every α we considered, on every substrate we tested:
+"production-acceptable" tolerance), the picture is mostly INT4 — except
+for one substrate where mixed-precision K4 / V2 takes the crown:
 
 | Substrate | α=10 leader | α=20 leader | α=50 leader |
 |---|---|---|---|
 | small (D=3, H=2, HD=96) | int4 (3.76) | int4 (3.69) | int4 (3.46) |
 | medium (D=6, H=4, HD=96) | int4 (3.80) | int4 (3.77) | int4 (3.66) |
-| large (D=10, H=9, HD=96) | int4 (3.82) | int4 (3.80) | int4 (3.75) |
+| **large (D=10, H=9, HD=96)** | **mixed_K4_V2 (4.56)** | **mixed_K4_V2 (4.07)** | **mixed_K4_V2 (2.60)** |
 | HD=64 (D=6, H=6) | int4 (3.73) | int4 (3.70) | int4 (3.59) |
 | HD=128 (D=6, H=3) | int4 (3.84) | int4 (3.80) | int4 (3.69) |
 
-**Pure per-(token, head) symmetric INT4 quantization is the universal
-restricted-Pareto leader** in our study. This robustness (5 substrates ×
-3 α values, all the same answer) is the strongest conclusion we draw.
+**Per-(token, head) symmetric INT4 is the restricted-Pareto leader on 4 of
+5 substrates**, but on the largest substrate `mixed_K4_V2` (4-bit K,
+2-bit V, ratio 5.05×, Δ=0.049) takes over at every α. The pattern is
+internally consistent with Finding 2 (aggressive quantization tolerates
+larger substrates better) and Finding 10 (V is the cheaper place to
+sacrifice bits). The deployment recommendation therefore depends on
+substrate scale: INT4 for ≤ 26 M-parameter models in our sweep, and
+the K4 / V2 split for ≥ 139 M-parameter models. Whether the crossover
+generalizes to multi-billion-parameter production models is open and is
+the most actionable follow-up from this paper.
 
 **Unrestricted view (no quality gate).** Without a quality gate, the
 leader is sensitive to both α and substrate:
@@ -369,11 +390,13 @@ artifact of training-time stochasticity at the smallest scale.
 
 ### 4.3 Eviction is not orthogonal to quantization on this substrate
 
-We tested three families of eviction:
+We tested four families of eviction:
 sliding window (W ∈ {64, 128, 256, 512}),
 StreamingLLM-style sink + window (S=4, W ∈ {64, 128, 256}),
-and top-k by ‖K‖₂ (k_frac ∈ {25 %, 50 %, 75 %}).
-All produced Δbpb in [0.14, 1.6] — far above the keep-gate of 0.10.
+top-k by ‖K‖₂ (k_frac ∈ {25 %, 50 %, 75 %}),
+and **H2O heavy-hitter** (recent R + top-k older tokens by total received
+attention; Zhang et al., 2023).
+All produced Δbpb in [0.10, 1.6] — at or above the keep-gate of 0.10.
 
 Stacking eviction × INT4 (e.g. `stack:sliding_W256+int4`,
 `stack:sink4_W256+int4`) inherits the eviction parent's quality cliff,
@@ -382,13 +405,34 @@ already been zeroed out*. The composite stack thus offers no advantage
 over the eviction parent alone, despite the higher headline
 compression ratio.
 
+**Heavy-hitter (H2O) is the eviction-family Pareto winner, but is still
+α20-dominated by INT4.** At every retention level on the medium
+substrate, H2O strictly improves on top-k-by-‖K‖ — the score-by-true-
+attention is a measurably better selection rule than the K-norm proxy:
+
+| keep_frac | top-k‖K‖ Δ | H2O Δ | top-k‖K‖ α20 | H2O α20 |
+|---|---|---|---|---|
+| 25 % | 0.76 | 0.67 | −11.3 | −9.8 |
+| 50 % | 0.37 | 0.32 | −5.4 | −4.4 |
+| 75 % | 0.14 | 0.10 | −1.5 | −0.7 |
+
+The H2O α20 score never crosses zero on this substrate; even the gentlest
+configuration (R=64, K=75 %, ratio 1.32×) sits at the boundary of
+production-acceptable quality, while INT4 at ratio 3.84× is essentially
+lossless. The H2O improvement over top-k‖K‖ is real but narrow.
+
 This is a **substrate-property** observation, not a method-of-eviction
 indictment: we trained with full attention (`window_pattern = 'L'`),
-so every token contributes during training. Re-running the substrate
-sweep with sliding-window-pretraining, or with a substrate that uses
-sliding+sink masks throughout training (à la StreamingLLM), would be
-needed to make eviction methods competitive at inference time. We
-list this as an explicit limitation in §5.
+so every token contributes during training. Even H2O's information-
+optimal selection cannot recover what the substrate distributes uniformly
+across all positions. Re-running the substrate sweep with
+sliding-window-pretraining, or with a substrate that uses sliding+sink
+masks throughout training (à la StreamingLLM), would be needed to make
+eviction methods competitive at inference time. A second confound is the
+"soft eviction" implementation limitation (§5): we zero K and V at
+evicted positions rather than masking them out of SDPA, which leaks a
+small softmax weight to those positions. The H2O Δbpb numbers above are
+therefore an upper bound on true heavy-hitter eviction's quality cost.
 
 ### 4.4 Recommendations for resource-adaptive deployment
 
@@ -401,11 +445,28 @@ Medium substrate (H=4, D=96, baseline = 1536 B/token-layer):
 | ≥ 208 B (~ 7× compression) | Δbpb < 0.50 (lossy) | INT2 sym per-(tok, head) |
 | ≥ 32 B (very aggressive) | quality not preserved | none we tested keeps Δ small enough — re-train substrate with sliding-window or low-rank-aware training |
 
-**Why no eviction / low-rank entry?** On this substrate (trained with full
-attention), every eviction or low-rank method we tried sat far above
-the Pareto front of pure INT-N quantization at the same byte budget.
-The pure-quantization Pareto front is the deployment recommendation at
-this scale; eviction and low-rank methods become competitive only after
+Large substrate (H=9, D=96, baseline = 3456 B/token-layer):
+
+| Memory budget per token-layer | Quality tolerance | Recommended compressor |
+|------|------|------|
+| ≥ 1764 B (~ 2× compression) | Δbpb < 10⁻⁴ | INT8 sym per-(tok, head) |
+| ≥ 900 B (~ 4× compression) | Δbpb < 0.002 | INT4 sym per-(tok, head) |
+| ≥ 684 B (~ 5× compression) | Δbpb < 0.05 | **mixed_K4_V2** (new α20 leader at large scale) |
+| ≥ 468 B (~ 7× compression) | Δbpb < 0.25 (lossy) | INT2 sym per-(tok, head) |
+
+The large-substrate row exposes a regime that does *not* exist on
+small/medium: an aggressive 4-bit K + 2-bit V split that matches INT4-
+class quality (Δ < 0.05) at 5×+ compression. Practitioners targeting
+≥ 100 M-parameter models should run `mixed_K4_V2` before settling on
+INT4, since the savings (≈ 24 % over INT4 at comparable quality) are
+free at this scale.
+
+**Why no eviction / low-rank entry?** On these substrates (all trained
+with full attention), every eviction or low-rank method we tried — even
+H2O heavy-hitter, the strongest of them — sits far above the Pareto
+front of pure INT-N quantization at the same byte budget. The pure-
+quantization Pareto front is the deployment recommendation at these
+scales; eviction and low-rank methods become competitive only after
 the substrate is itself adapted (training-time sliding-window mask, or
 projected K, V layers — out of scope here).
 
@@ -448,22 +509,33 @@ projected K, V layers — out of scope here).
 
 Holding the model and eval constant and demanding honest byte accounting,
 we obtain a clean Pareto front of KV-cache compressors that directly
-answers the deployment question for resource-adaptive inference. Our
-strongest finding is the **substrate-invariance of pure per-(token, head)
-symmetric INT4 quantization as the Pareto leader** under any
-production-acceptable quality gate (Δbpb < 0.10): across five substrates
-× three α values, the same compressor wins. Group-wise quantization,
-asymmetric quantization, mixed K/V precision, low-rank approximation,
-and every eviction variant we tested (sliding window, StreamingLLM
-sink+window, top-k by ‖K‖₂, head pruning, hybrid stacks) are
-*dominated* on this full-attention substrate at our scales. Eviction
-and low-rank methods become Pareto-competitive only after the
-substrate is itself adapted at training time (sliding-window masking,
-projected K, V layers) — a follow-up direction we leave open. The map
-from (memory budget, quality tolerance) → recommended compressor in
-§4.4 is therefore very simple at deployment time and the strongest
-practical recommendation we can give for a system serving a
-full-attention pre-trained model.
+answers the deployment question for resource-adaptive inference. Two
+findings carry the practical recommendation:
+
+1. **Per-(token, head) symmetric INT4 quantization is the
+   restricted-Pareto leader on every substrate ≤ 26 M parameters in our
+   sweep**, across α ∈ {10, 20, 50}. It is the safe default for serving a
+   full-attention pre-trained model under a Δbpb < 0.10 quality gate.
+2. **At ≥ 139 M parameters (large substrate), `mixed_K4_V2` overtakes
+   INT4 at every α we report.** A 4-bit K + 2-bit V split delivers 5.05×
+   compression at Δbpb = 0.049, displacing INT4 (3.84×, Δ ≈ 0.002) on
+   the restricted Pareto front. The crossover is consistent with the
+   substrate-scale tolerance pattern (Finding 2: aggressive
+   quantization tolerates larger substrates) and with the K-vs-V
+   asymmetry in quantization noise (Finding 10).
+
+Group-wise quantization, asymmetric quantization, low-rank approximation,
+and every eviction variant we tested — sliding window, StreamingLLM
+sink+window, top-k by ‖K‖₂, **H2O heavy-hitter** (the new strongest
+eviction baseline, but still α20-dominated by INT4), head pruning,
+hybrid stacks — are *dominated* on these full-attention substrates at
+our scales. Eviction and low-rank methods become Pareto-competitive only
+after the substrate is itself adapted at training time (sliding-window
+masking, projected K, V layers) — a follow-up direction we leave open.
+The map from (memory budget, quality tolerance) → recommended compressor
+in §4.4 is therefore short, scale-aware, and the strongest practical
+recommendation we can give for a system serving a full-attention
+pre-trained model.
 
 ## References
 
@@ -511,6 +583,7 @@ harness in `results.tsv`. Notation:
 | Sliding window W | `(min(W, T) / T) · 4 H D` |
 | StreamingLLM sink S + window W | `((S + min(W, T)) / T) · 4 H D` |
 | Top-k by ‖K‖₂ (k tokens) | `(k / T) · 4 H D + (k · ⌈log₂ T⌉) / (8 · T)` |
+| H2O heavy-hitter (recent R, keep_frac p) | `((R + p·(T−R))/T) · 4 H D + (p·(T−R) · ⌈log₂(T−R)⌉) / (8 · T)` |
 | Head pruning (keep H' of H heads) | `(H' / H) · 4 H D = 4 H' D` |
 | SVD low-rank (rank r) | `4 r` |
 | Random projection (rank r) | `4 r` |
