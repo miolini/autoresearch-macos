@@ -260,26 +260,81 @@ def plot_head_dim_sweep(rows, out_path):
 
 
 def plot_score_trajectory(rows, out_path):
-    fig, ax = plt.subplots(figsize=(9, 4.5))
-    xs = list(range(1, len(rows) + 1))
-    ys = [r["compression_score"] for r in rows]
-    statuses = [r["status"] for r in rows]
-    colors = {"keep": "seagreen", "discard": "lightcoral", "crash": "black"}
-    cs = [colors.get(s, "gray") for s in statuses]
-    ax.bar(xs, ys, color=cs, edgecolor="black", linewidth=0.4)
-    running = []
-    cur = -math.inf
-    for s, st in zip(ys, statuses):
-        if st == "keep":
-            cur = max(cur, s)
-        running.append(cur if cur != -math.inf else 0)
-    ax.plot(xs, running, c="steelblue", lw=2, marker="o", ms=4, label="best so far")
-    ax.axhline(1.0, c="gray", ls=":", lw=1, label="identity baseline")
-    ax.set_xlabel("Experiment index")
-    ax.set_ylabel(r"$S(\alpha=10) = $ratio$- 10 \max(\Delta\mathrm{bpb}, 0)$")
-    ax.set_title("Compression score over experimentation trajectory")
-    ax.legend()
-    ax.grid(alpha=0.25, axis="y")
+    """One panel per substrate so the running-best line doesn't jump
+    when the substrate changes."""
+    SUBS_ORDER = ["small", "medium", "large", "hd64", "hd128", "small_legacy"]
+    by_sub = {}
+    for r in rows:
+        by_sub.setdefault(r["substrate"], []).append(r)
+    present = [s for s in SUBS_ORDER if s in by_sub]
+    if not present:
+        return
+    n = len(present)
+    fig, axes = plt.subplots(n, 1, figsize=(9, 2.8 * n), sharex=False)
+    if n == 1:
+        axes = [axes]
+    for ax, sub in zip(axes, present):
+        srows = by_sub[sub]
+        xs = list(range(1, len(srows) + 1))
+        ys = [r["compression_score"] for r in srows]
+        statuses = [r["status"] for r in srows]
+        colors = {"keep": "seagreen", "discard": "lightcoral", "crash": "black"}
+        cs = [colors.get(s, "gray") for s in statuses]
+        ax.bar(xs, ys, color=cs, edgecolor="black", linewidth=0.4)
+        # Running best within this substrate, gated by Δ < 0.10 so eviction
+        # winners under raw α=10 don't artificially raise the line.
+        running = []
+        cur = -math.inf
+        for r in srows:
+            if r["status"] == "keep" and r["val_bpb_delta"] < 0.10:
+                cur = max(cur, r["compression_score"])
+            running.append(cur if cur != -math.inf else 0)
+        ax.plot(xs, running, c="steelblue", lw=2, marker="o", ms=4,
+                label="best so far (Δ<0.10)")
+        ax.axhline(1.0, c="gray", ls=":", lw=1, label="identity baseline")
+        ax.set_ylabel(r"$S(\alpha=10)$")
+        ax.set_title(f"{sub} substrate ({len(srows)} experiments)")
+        ax.legend(loc="upper left", fontsize=7)
+        ax.grid(alpha=0.25, axis="y")
+    axes[-1].set_xlabel("Experiment index (per substrate)")
+    fig.suptitle("Compression score trajectory, faceted by substrate")
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=140)
+    plt.close(fig)
+
+
+def plot_alpha_divergence(rows, out_path, substrate="medium"):
+    """For each compressor on a substrate, plot S(α=10) vs S(α=20) vs S(α=50).
+    Shows how the leader changes — esp. how α=10 picks high-Δ extreme-ratio
+    compressors that α=20/50 reject."""
+    sub_rows = [r for r in rows if r["substrate"] == substrate]
+    if not sub_rows:
+        return
+    # Recompute score under each α from ratio + delta.
+    def score(r, a):
+        return r["compression_ratio"] - a * max(r["val_bpb_delta"], 0)
+    sub_rows = sorted(sub_rows, key=lambda r: -score(r, 10))
+    names = [r["name"][:24] for r in sub_rows]
+    s10 = [score(r, 10) for r in sub_rows]
+    s20 = [score(r, 20) for r in sub_rows]
+    s50 = [score(r, 50) for r in sub_rows]
+    fig, ax = plt.subplots(figsize=(11, max(5, 0.32 * len(names))))
+    y = list(range(len(names)))
+    ax.barh([yi + 0.25 for yi in y], s10, height=0.22, label=r"$S(\alpha=10)$",
+            color="#1f77b4", edgecolor="black", linewidth=0.3)
+    ax.barh(y, s20, height=0.22, label=r"$S(\alpha=20)$",
+            color="#ff7f0e", edgecolor="black", linewidth=0.3)
+    ax.barh([yi - 0.25 for yi in y], s50, height=0.22, label=r"$S(\alpha=50)$",
+            color="#d62728", edgecolor="black", linewidth=0.3)
+    ax.axvline(0, c="black", lw=0.5)
+    ax.set_yticks(y)
+    ax.set_yticklabels(names, fontsize=7)
+    ax.invert_yaxis()
+    ax.set_xlabel("Composite score S(α) = ratio − α · max(Δbpb, 0)")
+    ax.set_title(f"α-divergence: how the leader changes under α∈{{10,20,50}} ({substrate} substrate)\n"
+                 "extreme-Δ rows are positive at α=10 but go strongly negative at α=50")
+    ax.legend(loc="lower right", fontsize=8)
+    ax.grid(alpha=0.25, axis="x")
     fig.tight_layout()
     fig.savefig(out_path, dpi=140)
     plt.close(fig)
@@ -323,7 +378,9 @@ if __name__ == "__main__":
     plot_substrate_sweep(rows, os.path.join(FIG_DIR, "substrate_sweep.png"))
     plot_head_dim_sweep(rows, os.path.join(FIG_DIR, "head_dim_sweep.png"))
     plot_score_trajectory(rows, os.path.join(FIG_DIR, "score_trajectory.png"))
+    plot_alpha_divergence(rows, os.path.join(FIG_DIR, "alpha_divergence.png"), substrate="medium")
     plot_method_comparison(rows, os.path.join(FIG_DIR, "method_comparison.png"))
     print(f"Wrote {len(rows)} rows -> "
           f"{FIG_DIR}/pareto.png, family_pareto.png, substrate_sweep.png, "
-          f"head_dim_sweep.png, score_trajectory.png, method_comparison.png")
+          f"head_dim_sweep.png, score_trajectory.png, alpha_divergence.png, "
+          f"method_comparison.png")
