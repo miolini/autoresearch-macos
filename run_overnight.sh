@@ -26,14 +26,15 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 LOG=overnight.log
-PROMPT='Hi — read program.md and continue the autonomous KV-cache compression
-research loop. We are on branch autoresearch/apr29-kvcompress (or the most
-recent autoresearch/*-kvcompress branch if a newer one exists); resume from
-the last commit, append to results.tsv, refresh figures with
-`uv run figures.py`, and update paper.md with significant findings as you go.
-NEVER STOP, NEVER ASK PERMISSION. The human is asleep. Keep iterating
-compressors (quantization variants, low-rank, eviction, hybrids) until
-interrupted.'
+PROMPT='You are the engineer driving the KV-cache compression project for the
+ICML AdaptFM workshop. Read program.md and paper.md, then loop the workflow
+in program.md (critique → plan → implement → run → log → commit →
+update paper/figures → repeat). Branch: autoresearch/apr29-kvcompress (or
+the latest *-kvcompress). Top priorities: (1) broaden compression-family
+coverage beyond quantization (eviction, low-rank, head sharing, hybrids);
+(2) substrate-scale sweep; (3) airtight byte-accounting in Appendix B.
+Never ask for permission. Never stop voluntarily. Edit files, commit, and
+push when there is meaningful progress.'
 
 if ! command -v claude >/dev/null 2>&1; then
     echo "claude CLI not found. Install with: npm install -g @anthropic-ai/claude-code"

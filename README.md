@@ -57,10 +57,10 @@ bash setup_runpod.sh
 # 2. Run a single experiment by hand to verify (~5 min training + ~30 s eval)
 uv run train.py
 
-# 3. Launch Claude in fully autonomous "never ask permission" mode for the night
+# 3. Launch Claude in "never ask permission" mode to run the workflow loop
 bash run_overnight.sh                     # tails to overnight.log; auto-restarts on crash
 # or, equivalently, by hand:
-echo "Read program.md and run the autonomous loop." | claude \
+echo "Read program.md and run the workflow loop on this branch." | claude \
     --dangerously-skip-permissions \
     --permission-mode acceptEdits \
     --print
