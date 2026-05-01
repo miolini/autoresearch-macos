@@ -223,9 +223,22 @@ on HEAD_DIM ∈ {64, 96, 128} variants of the medium substrate
 ### 3.2 Pareto front on the reference substrate
 
 Figure `figures/pareto.png` plots Δbpb vs compression ratio for every
-compressor evaluated. Iso-score lines for α ∈ {10, 20, 50} are overlaid
-to illustrate how the recommendation shifts under different quality
-budgets.
+compressor evaluated. Three regions are visible by inspection:
+
+- **Lossless plateau at Δ < 10⁻³** (INT8 family, INT4 family on
+  small/medium, K8_V4 family). Compression ratios in [1.96, 4.0].
+- **Production-acceptable band at Δ ∈ [10⁻³, 10⁻¹]** populated almost
+  exclusively by quantization variants. The α20 leader on each substrate
+  lives in this band: INT4 on small/medium/hd64/hd128, mixed_K4_V2 on
+  large/hd128_large, with the H2O+INT4 stack just barely inside the
+  band on large at 5.07× / Δ=0.095.
+- **Quality cliff at Δ > 10⁻¹** populated by all four pure-eviction
+  families and by aggressive quant (INT2, K2_V*). Even the strongest
+  eviction (H2O at K=75 %) sits at Δ ≈ 0.1; sliding window and
+  StreamingLLM sink+window peak at Δ > 1.
+
+The third region is wide and ratio-rich (up to 30× for sliding+INT4
+stacks) but Pareto-irrelevant under any production-grade quality gate.
 
 ### 3.3 Substrate-scale sweep
 
@@ -269,15 +282,22 @@ from the leaderboard re-run (see `figures/substrate_sweep.png`):
 
 Figure `figures/family_pareto.png` colours each compressor on the
 medium substrate by family (quantization / quant-group / quant-mixed /
-eviction / sink+window / top-k / low-rank / head-prune / hybrid /
-stack). Two visual takeaways:
+eviction / sink+window / top-k / H2O / low-rank / head-prune / hybrid /
+stack). Three visual takeaways:
 
 1. **The quantization family hugs the lower-left of the Pareto plane**
-   (low Δ, moderate ratio). All other families sit at higher Δ or
-   lower ratio.
-2. **Hybrid stacks (quant × eviction) inherit their eviction parent's
-   Δ.** They appear at high ratio + high Δ — visually clustered with
-   their eviction parents, not with their quant inner.
+   (low Δ, moderate-to-high ratio). All other families sit at higher Δ
+   *or* lower ratio.
+2. **Within eviction, H2O is the new bottom-left** (lowest Δ at any
+   given ratio): the heavy-hitter family lies entirely below the top-k‖K‖,
+   sink+window, and sliding window families on the medium-substrate
+   Pareto plot, by a consistent margin (cf. table in §4.3).
+3. **Hybrid stacks inherit the eviction parent's Δ.** Sliding/sink ×
+   INT4 stacks land at high ratio + Δ ≈ 1.4 (their eviction parent's
+   cliff); the new H2O × INT4 stack lands at ratio 5.06× / Δ ≈ 0.10
+   (within an order of magnitude of pure INT4 on Δ), which is the
+   first eviction-based composition to escape the quality cliff
+   visible elsewhere in the figure.
 
 This picture is the strongest evidence in our study that the
 inference-time deployment Pareto front, *for a substrate trained with
