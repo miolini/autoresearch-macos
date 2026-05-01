@@ -82,25 +82,14 @@ under different quality budgets without rerunning experiments.
     4-bit K + 2-bit V is the first compressor in our study to dominate
     vanilla INT4, but only on substrates with enough layers to absorb
     the V-side noise.
-12. **K-vs-V asymmetry generalizes to scale and even widens.** Across
-    two large-substrate variants (HD=96, HD=128) and two byte budgets
-    (5.05× ratio for K=4/V=2, 3.10× ratio for K=8/V=2), we measured the
-    cost of swapping K and V bit-widths at the *same* byte budget:
-
-    | Substrate | Ratio | K-high Δ | V-high Δ | K-bit penalty |
-    |---|---|---|---|---|
-    | large (HD=96)        | 5.05× | K4_V2: 0.049 | K2_V4: 0.158 | **3.2×** |
-    | hd128_large (HD=128) | 5.12× | K4_V2: 0.047 | K2_V4: 0.172 | **3.7×** |
-    | large (HD=96)        | 3.10× | K8_V2: 0.047 | K2_V8: 0.157 | **3.3×** |
-    | hd128_large (HD=128) | 3.12× | K8_V2: 0.045 | K2_V8: 0.171 | **3.8×** |
-
-    Even when V can be 2-bit at scale, K cannot — the `q · k` dot-
-    product remains the precision-critical operation across every
-    substrate we tested. The penalty is also remarkably consistent
-    across byte budget (3.2–3.8×), suggesting it is a structural
-    property of attention rather than a quantization-noise artifact.
-    The recommended bit allocation is therefore "spend bits on K first"
-    at every scale we measured.
+12. **K-vs-V asymmetry generalizes to scale and even widens.** A
+    matched-pair sweep (§4.4) at two byte budgets (3.10× and 5.05×)
+    on both large-depth substrates shows that swapping K-precision
+    down at the same byte budget costs Δbpb a remarkably consistent
+    **3.2–3.8×** across all four (substrate, byte budget) combinations.
+    The K-bit penalty appears to be a structural property of attention
+    rather than a quantization-noise artifact. The recommended bit
+    allocation is "spend bits on K first" at every scale we measured.
 
 We position these findings explicitly as **deployment-time guidance**:
 given a memory budget per token and a quality tolerance, the Pareto
@@ -509,7 +498,51 @@ evicted positions rather than masking them out of SDPA, which leaks a
 small softmax weight to those positions. The H2O Δbpb numbers above are
 therefore an upper bound on true heavy-hitter eviction's quality cost.
 
-### 4.4 Recommendations for resource-adaptive deployment
+### 4.4 K-vs-V precision asymmetry as a structural attention property
+
+Mixed-precision K/V compressors (`mixed_K{k}_V{v}`: K quantized to k bits,
+V to v bits, with otherwise-symmetric per-(token, head) scaling) test the
+hypothesis that asymmetric bit allocation can outperform uniform INT-N
+at the same byte budget. The medium-substrate Finding 10 (`mixed_K8_V4`
+beats `mixed_K4_V8` by ~ 2× on Δbpb) is the well-known KIVI-style
+asymmetry. We extend it in two directions and find a remarkably
+consistent structural property.
+
+**Direction 1: bit-budget sweep (4 + 4 → 4 + 2 → 2 + 4 → 8 + 2 → 2 + 8).**
+At the medium substrate at fixed K-V byte split:
+
+| Pair | Ratio | High-K Δ | High-V Δ | Penalty |
+|---|---|---|---|---|
+| K8_V4 vs K4_V8 | 2.59× | 0.0013 | 0.0022 | 1.7× |
+
+(Other Δ values at medium for the more aggressive pairs are below our
+deployment relevance — `K4_V2 medium` Δ=0.10 sits at the keep-gate.)
+
+**Direction 2: scale generalization.** Repeating the matched-pair test
+on the two large-depth substrates (large at HD=96, hd128_large at HD=128)
+across two byte budgets (5.05× ratio for K=4/V=2, 3.10× ratio for
+K=8/V=2):
+
+| Substrate | Ratio | K-high Δ | V-high Δ | K-bit penalty |
+|---|---|---|---|---|
+| large (HD=96)        | 5.05× | K4_V2: 0.049 | K2_V4: 0.158 | **3.2×** |
+| hd128_large (HD=128) | 5.12× | K4_V2: 0.047 | K2_V4: 0.172 | **3.7×** |
+| large (HD=96)        | 3.10× | K8_V2: 0.047 | K2_V8: 0.157 | **3.3×** |
+| hd128_large (HD=128) | 3.12× | K8_V2: 0.045 | K2_V8: 0.171 | **3.8×** |
+
+The "spend bits on K first" recommendation is therefore not just an
+empirical observation about INT-N quantization noise — the K-bit
+penalty is **almost identical (3.2–3.8×) across substrate, head_dim,
+and byte budget**, which argues that it is a structural property of
+the attention mechanism: V-noise dilutes through the softmax-weighted
+sum in attention output, while K-noise compounds inside the
+`q · k / √d` similarity score and shifts which tokens softmax allocates
+weight to. Quantization-aware training, channel-wise scale design, or
+even the choice of attention-noise-tolerant softmax variants (e.g.
+Sparse / Top-k softmax) should treat K and V as fundamentally different
+storage targets.
+
+### 4.5 Recommendations for resource-adaptive deployment
 
 Medium substrate (H=4, D=96, baseline = 1536 B/token-layer):
 
@@ -611,7 +644,7 @@ our scales. Eviction and low-rank methods become Pareto-competitive only
 after the substrate is itself adapted at training time (sliding-window
 masking, projected K, V layers) — a follow-up direction we leave open.
 The map from (memory budget, quality tolerance) → recommended compressor
-in §4.4 is therefore short, scale-aware, and the strongest practical
+in §4.5 is therefore short, scale-aware, and the strongest practical
 recommendation we can give for a system serving a full-attention
 pre-trained model.
 
