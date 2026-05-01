@@ -739,11 +739,20 @@ class StackedCompressor(KVCompressor):
         self.outer = outer
         self.inner = inner
         self.name = f"stack_{outer.name}+{inner.name}"
+        # Stack needs q from the hook iff either side needs q (H2O outer or
+        # — hypothetically — a future q-using inner).
+        self.needs_q = getattr(outer, "needs_q", False) or getattr(inner, "needs_q", False)
 
-    def compress(self, k, v):
-        outer_state, outer_bytes = self.outer.compress(k, v)
+    def compress(self, k, v, q=None):
+        if getattr(self.outer, "needs_q", False):
+            outer_state, outer_bytes = self.outer.compress(k, v, q=q)
+        else:
+            outer_state, outer_bytes = self.outer.compress(k, v)
         k1, v1 = self.outer.decompress(outer_state)
-        inner_state, inner_full_bytes = self.inner.compress(k1, v1)
+        if getattr(self.inner, "needs_q", False):
+            inner_state, inner_full_bytes = self.inner.compress(k1, v1, q=q)
+        else:
+            inner_state, inner_full_bytes = self.inner.compress(k1, v1)
         k2, v2 = self.inner.decompress(inner_state)
         full_bf16_bytes = (k.numel() + v.numel()) * 2
         kept_fraction = outer_bytes / full_bf16_bytes if full_bf16_bytes > 0 else 1.0

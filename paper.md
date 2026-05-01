@@ -432,11 +432,22 @@ attention; Zhang et al., 2023).
 All produced Δbpb in [0.10, 1.6] — at or above the keep-gate of 0.10.
 
 Stacking eviction × INT4 (e.g. `stack:sliding_W256+int4`,
-`stack:sink4_W256+int4`) inherits the eviction parent's quality cliff,
-because the inner INT4 quantization operates on tokens *that have
-already been zeroed out*. The composite stack thus offers no advantage
-over the eviction parent alone, despite the higher headline
-compression ratio.
+`stack:sink4_W256+int4`) inherits the eviction parent's Δbpb almost
+exactly, because the inner INT4 quantization operates on tokens *that
+have already been zeroed out* and contributes only its own (very small)
+Δ on top. For sliding / sink eviction this is catastrophic — those
+parents have Δ ≈ 1.4, so the stack inherits a 1.4 cliff even at 30×
+nominal ratio. For **H2O eviction the inherited Δ is much smaller**:
+`stack:h2o_R64_K75pct+int4` lands at ratio 5.06× / Δ=0.105 on medium
+and ratio 5.07× / Δ=0.095 on large (the latter clears the Δ<0.10
+keep gate), confirming both halves of the rule:
+(a) the stack's Δ ≈ the eviction parent's Δ regardless of the inner
+quant choice, and (b) the inner quant scales the headline ratio
+roughly by `bytes(inner)/bytes(bf16)`. So an H2O+INT4 stack is the
+first eviction-based composition to reach a "kept-quality"
+configuration, but it is still *strictly Pareto-dominated* by
+`mixed_K4_V2` on large (5.05× / Δ=0.049) and by `int4` on medium
+(3.84× / Δ=0.003).
 
 **Heavy-hitter (H2O) is the eviction-family Pareto winner, but is still
 α20-dominated by INT4.** At every retention level on the medium
