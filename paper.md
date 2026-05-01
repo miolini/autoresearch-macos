@@ -26,21 +26,42 @@ scales, zero-points, indices, and any auxiliary metadata. We sweep
 α ∈ {10, 20, 50} so the Pareto-optimal recommendation can be re-read
 under different quality budgets without rerunning experiments.
 
-**Findings (this draft, expanded as further compressors are added).**
+**Findings on the medium substrate (D=6, n_kv_head=4, head_dim=96).**
 
 1. **INT8 symmetric per-(token, head) quantization is effectively
-   lossless** on the substrate (Δval_bpb < 5 × 10⁻⁵ at 1.96× compression).
-2. **INT4 sym per-(token, head)** is the strongest Pareto-efficient point
-   at moderate compression (3.84×, Δ ≈ 3 × 10⁻³).
-3. **INT2** reaches the quality cliff (Δ ≈ 0.28 at 7.4× compression);
+   lossless** (Δval_bpb < 3 × 10⁻⁵ at 1.96× compression).
+2. **INT4 sym per-(token, head) is the deployment-optimal compressor
+   under both α = 20 and α = 50** at moderate compression (3.84×,
+   Δ ≈ 3.6 × 10⁻³). It dominates every hybrid, eviction, low-rank, and
+   group-wise variant we evaluated when quality matters.
+3. **Pure eviction is catastrophic on a full-attention substrate.**
+   Sliding window (W ∈ {64, 128, 256, 512}), StreamingLLM-style sink +
+   window, and top-k-by-‖K‖ all incur Δval_bpb ≈ 0.4–1.6. Even hybrid
+   stacks (eviction × INT4) inherit the eviction parent's quality cliff.
+4. **INT2 reaches the quality cliff** (Δ ≈ 0.45 at 7.4× compression);
    under α ≥ 20 it is dominated by INT4.
-4. **Group-wise quantization** at our head-dim adds scale overhead that
-   exceeds its quality benefit at α = 10; the win region opens at larger
-   head dimensions, which we test in the substrate-scale sweep below.
-5. **Hybrid (recent-tokens-bf16 + old-tokens-INT2)** dominates pure INT2
-   by exploiting attention's recency bias: 6.2× compression at Δ ≈ 0.02,
-   composite score 5.94 (best on this substrate at α = 10).
-6. *(more findings as the loop runs)*
+5. **Hybrid recent-bf16 + old-INT2 underperforms vanilla INT4** at this
+   scale (Δ ≈ 0.44, score < INT4): the small-substrate finding that
+   hybrid was optimal does not generalize once `head_dim · n_kv_head`
+   grows. The hybrid recent-bf16 + old-**INT4** variant matches vanilla
+   INT4's quality (Δ ≈ 0.0035) at lower ratio (3.53× vs 3.84×) — strict
+   loss to vanilla INT4.
+6. **Per-token SVD low-rank fails on this substrate.** Even at r=32
+   (12× compression), Δ ≈ 1.55. The frozen substrate has no low-rank
+   structure to exploit at decode time; this is a substrate property,
+   not a method-of-low-rank artifact.
+7. **Head pruning costs scale super-linearly with the fraction dropped.**
+   1-of-4 heads → Δ = 0.25; 2-of-4 → Δ = 0.60. Surviving heads cannot
+   compensate for missing ones in a substrate that was trained with all
+   heads in use.
+8. **Group-wise quantization** at this head-dim adds scale overhead that
+   exceeds its quality benefit; the win region opens (if at all) at
+   larger head dimensions — see the substrate-scale sweep.
+9. **The leaderboard ordering at α = 10 is misleading.** Many extreme-
+   ratio + extreme-loss compressors win α = 10 by exploiting the small
+   per-Δ penalty. We therefore report `S(20)` as the primary leaderboard
+   metric and require `Δ < 0.10` for "kept" status; the full triple
+   `(S(10), S(20), S(50))` is in `results.tsv`.
 
 We position these findings explicitly as **deployment-time guidance**:
 given a memory budget per token and a quality tolerance, the Pareto
@@ -196,12 +217,22 @@ generalizes at longer T and across substrate scales.
 
 ### 4.4 Recommendations for resource-adaptive deployment
 
+Medium substrate (H=4, D=96, baseline = 1536 B/token-layer):
+
 | Memory budget per token-layer | Quality tolerance | Recommended compressor |
 |------|------|------|
-| ≥ 392 B (~ 2× compression) | any | INT8 sym per-(tok, head) |
-| ≥ 200 B (~ 4× compression) | Δbpb ≤ 0.005 | INT4 sym per-(tok, head) |
-| ≥ 125 B (~ 6× compression) | Δbpb ≤ 0.05 | hybrid recent + INT2 old |
-| ≥ 104 B (~ 7× compression) | Δbpb ≤ 0.30 | INT2 sym (lossy regime) |
+| ≥ 784 B (~ 2× compression) | Δbpb < 10⁻⁴ | INT8 sym per-(tok, head) |
+| ≥ 400 B (~ 4× compression) | Δbpb < 0.005 | INT4 sym per-(tok, head) |
+| ≥ 208 B (~ 7× compression) | Δbpb < 0.50 (lossy) | INT2 sym per-(tok, head) |
+| ≥ 32 B (very aggressive) | quality not preserved | none we tested keeps Δ small enough — re-train substrate with sliding-window or low-rank-aware training |
+
+**Why no eviction / low-rank entry?** On this substrate (trained with full
+attention), every eviction or low-rank method we tried sat far above
+the Pareto front of pure INT-N quantization at the same byte budget.
+The pure-quantization Pareto front is the deployment recommendation at
+this scale; eviction and low-rank methods become competitive only after
+the substrate is itself adapted (training-time sliding-window mask, or
+projected K, V layers — out of scope here).
 
 (table updated as the leaderboard grows)
 
@@ -252,25 +283,94 @@ corresponding commit and running `uv run train.py` on the same substrate.
 ## Appendix B. Honest byte accounting (closed-form per compressor)
 
 For every compressor we provide a closed-form expression for
-`bytes_per_token_per_layer` (denoted *bpt*) that exactly equals the
-measured value reported in `results.tsv`. Let
-`H = n_kv_head`, `D = head_dim`, all scales in BF16 (2 bytes each).
+`bytes_per_token_per_layer` (denoted *bpt*) that we verify, to within
+1 byte, against the measured `compressed_bytes_per_tok` reported by the
+harness in `results.tsv`. Notation:
 
-| Compressor | Closed-form *bpt* | Notes |
-|---|---|---|
-| Identity (BF16) | `4 H D` | K and V, 2 bytes each, both stored in full |
-| INT-N sym per-(tok, head) | `2 · ⌈H D N / 8⌉ + 2 · 2 H` | Both K, V data + per-(tok,head) scales |
-| INT-N sym group_size = G | `2 · ⌈H D N / 8⌉ + 2 · 2 H · ⌈D / G⌉` | One scale per group, K and V |
-| INT-N asym | `2 · ⌈H D N / 8⌉ + 2 · 2 H + 2 · 2 H` | Adds zero-points (BF16) |
-| Mixed-precision K_kbits / V_vbits | `⌈H D · k_bits / 8⌉ + ⌈H D · v_bits / 8⌉ + 2 · 2 H` | Different bit-widths for K, V |
-| Sliding window (size W) | `4 H D · min(1, W/T)` | Old tokens dropped (zero stored bytes) |
-| Hybrid recent-R bf16 + old INT-N | `(R/T) · 4 H D + ((T−R)/T) · (2⌈HDN/8⌉ + 4H)` | Time-averaged |
-| Random projection (rank r) | `2 · 2 r` | r bf16 floats per K, per V |
-| Top-k eviction (keep k tokens) | `(k/T) · 4 H D + ⌈log₂ T⌉ · k / 8` | Indices for the kept tokens |
+- `H = n_kv_head`, `D = head_dim`, `T = sequence length` (= 2048)
+- `N = bit-width`, `G = group size`, `R = recent-tokens cutoff`
+- `k = #kept tokens` (eviction), `r = projection rank`
+- All scales and zero-points stored in BF16 (2 bytes each)
+- BF16 baseline cost is `4 H D` bytes per token-layer (K + V, 2 bytes each)
+- Eviction-style methods produce a fractional bpt by averaging over T
+  positions: kept positions cost full bytes, dropped positions cost 0
 
-Each row above is verified against the measured `bytes_per_token_per_layer`
-reported by the harness. Any discrepancy of > 1 byte is treated as a bug
-in the compressor and triggers a `crash` row.
+### B.1 Closed-form table
+
+| Compressor | Closed-form *bpt* |
+|---|---|
+| Identity (BF16) | `4 H D` |
+| INT-N sym per-(tok, head) | `2 · ⌈H D N / 8⌉ + 4 H` |
+| INT-N sym group_size = G | `2 · ⌈H D N / 8⌉ + 4 H · (D / G)` |
+| INT-N asym | `2 · ⌈H D N / 8⌉ + 8 H` |
+| Mixed-precision K_k / V_v | `⌈H D · k / 8⌉ + ⌈H D · v / 8⌉ + 4 H` |
+| Sliding window W | `(min(W, T) / T) · 4 H D` |
+| StreamingLLM sink S + window W | `((S + min(W, T)) / T) · 4 H D` |
+| Top-k by ‖K‖₂ (k tokens) | `(k / T) · 4 H D + (k · ⌈log₂ T⌉) / (8 · T)` |
+| Head pruning (keep H' of H heads) | `(H' / H) · 4 H D = 4 H' D` |
+| SVD low-rank (rank r) | `4 r` |
+| Random projection (rank r) | `4 r` |
+| Hybrid recent-R bf16 + old INT-N | `(R/T) · 4 H D + ((T−R)/T) · (2⌈HDN/8⌉ + 4 H)` |
+| Stack: outer eviction × inner C | `(bpt(outer) / bpt(identity)) · bpt(inner)` |
+
+### B.2 Verification on the medium substrate (H=4, D=96, T=2048)
+
+Predicted bpt vs measured bpt (from `results.tsv`). All match to 0 bytes
+except top-k indices, which match to ≤ 0.01 bytes (rounding noise from
+averaging over the batch).
+
+| Compressor | Predicted | Measured | Δ |
+|---|---|---|---|
+| Identity | 1536.00 | 1536.00 | 0 |
+| INT8 sym per-(tok,head) | `2·384 + 16 = 784` | 784.00 | 0 |
+| INT4 sym per-(tok,head) | `2·192 + 16 = 400` | 400.00 | 0 |
+| INT2 sym per-(tok,head) | `2·96 + 16 = 208` | 208.00 | 0 |
+| Sliding W=64 | `(64/2048)·1536 = 48` | 48.00 | 0 |
+| Sliding W=128 | 96.00 | 96.00 | 0 |
+| Sliding W=256 | 192.00 | 192.00 | 0 |
+| Sliding W=512 | 384.00 | 384.00 | 0 |
+| Sink4 + W=64 | `(68/2048)·1536 = 51` | 51.00 | 0 |
+| Sink4 + W=128 | `(132/2048)·1536 = 99` | 99.00 | 0 |
+| Sink4 + W=256 | `(260/2048)·1536 = 195` | 195.00 | 0 |
+| Top-k 25% (k=512) | `(512/2048)·1536 + (512·11)/(8·2048) = 384.34` | 384.34 | 0 |
+| Top-k 50% (k=1024) | `768 + 0.69 = 768.69` | 768.69 | 0 |
+| Top-k 75% (k=1536) | `1152 + 1.03 = 1153.03` | 1153.03 | 0 |
+| SVD r=8 | `4·8 = 32` | 32.00 | 0 |
+| SVD r=16 | `4·16 = 64` | 64.00 | 0 |
+| SVD r=32 | `4·32 = 128` | 128.00 | 0 |
+| Headprune 1 of 4 | `4·3·96 = 1152` | 1152.00 | 0 |
+| Headprune 2 of 4 | `4·2·96 = 768` | 768.00 | 0 |
+| Hybrid R=64 INT2 | `48 + (1984/2048)·208 = 249.50` | 249.50 | 0 |
+| Hybrid R=64 INT4 | `48 + (1984/2048)·400 = 435.50` | 435.50 | 0 |
+| Hybrid R=128 INT2 | `96 + (1920/2048)·208 = 291` | 291.00 | 0 |
+| Stack sliding_W256 + INT4 | `(192/1536)·400 = 50` | 50.00 | 0 |
+| Stack sink4_W256 + INT4 | `(195/1536)·400 = 50.78` | 50.78 | 0 |
+| Stack headprune_1 + INT4 | `(1152/1536)·400 = 300` | 300.00 | 0 |
+
+### B.3 Counted artifacts and what is *not* counted
+
+For every compressor `n_bytes` is the **honest** byte cost: per-token
+data, scale storage, zero-point storage, position-index storage (when
+indices are needed to reconstruct which tokens survived eviction), and
+any auxiliary metadata. Quantities that are *not* counted (and the
+justification per item):
+
+- **Calibration matrices** for SVD and random-projection low-rank:
+  these are amortized across the entire serving lifetime, so they are
+  one-time (not per-token-per-layer) cost. The serving cost per token
+  is the projected coefficient vector only.
+- **Layer-shared and head-shared metadata**: in any compressor where the
+  same shape of scale/zero-point would be stored once per layer or per
+  head, we only count the per-token-per-head scale; the layer-level
+  metadata is `O(1)` and dwarfed by the per-token storage.
+- **Compute / latency**: this Appendix is purely about memory. Compute
+  cost (e.g. SVD calibration once, or per-decoded-token Top-k selection)
+  is discussed in §5 (Limitations).
+
+A compressor that under-reports its bytes is treated as a leaderboard
+violation: the offending row is removed and the compressor is fixed.
+The verification table above is regenerated automatically from
+`results.tsv` and is the ground truth for any closed-form claim.
 
 ## Appendix C. Per-experiment leaderboard
 
