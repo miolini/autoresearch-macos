@@ -180,6 +180,9 @@ class KVCompressor:
         of the model (bf16 on MPS/CPU, bf16/fp16 on CUDA).
     """
     name = "identity"
+    # Set to True in subclasses that need post-rotary Q to score tokens
+    # (e.g. H2O heavy-hitter eviction). Such compressors get q passed via kwarg.
+    needs_q = False
 
     def __init__(self, config):
         self.config = config
@@ -578,6 +581,77 @@ class TopKByKNormCompressor(KVCompressor):
         return state
 
 
+class H2OCompressor(KVCompressor):
+    """H2O ("Heavy Hitter Oracle") eviction (Zhang et al., 2023):
+    keep the last `recent` tokens plus the top-(keep_frac × (T-recent))
+    older tokens by total attention received from all causal queries.
+
+    Heavy-hitter score for key position j:
+        score[j] = Σ_{i ≥ j}  softmax_{j' ≤ i}( q_i · k_{j'} / √d )[j]
+    pooled across heads (sum) and computed once per batch in the eval pass.
+    Eviction is per-position (same indices kept across heads), since the KV
+    cache is laid out per-(batch, position).
+
+    GQA handling: queries are mean-pooled across each KV-head's group before
+    scoring (so attention is computed at the KV-head granularity).
+
+    Storage (matching topk_knorm pattern):
+      kept tokens × full bf16 K+V  +  ⌈log₂(T-recent)⌉ bits per heavy-hitter
+      (recent positions are positionally implicit; their indices are free).
+    """
+    needs_q = True
+
+    def __init__(self, config, recent=64, keep_frac=0.5):
+        super().__init__(config)
+        self.recent = recent
+        self.keep_frac = keep_frac
+        self.name = f"h2o_R{recent}_K{int(round(keep_frac*100))}pct"
+
+    def compress(self, k, v, q):
+        B, T, H, D = k.shape       # H = n_kv_head
+        Hq = q.shape[2]            # n_head
+        group = Hq // H
+        if T <= self.recent:
+            n_bytes = (k.numel() + v.numel()) * 2
+            return (k, v), n_bytes
+        cutoff = T - self.recent
+        keep_old = max(0, int(round(self.keep_frac * cutoff)))
+        keep_total = self.recent + keep_old
+        if keep_total >= T:
+            n_bytes = (k.numel() + v.numel()) * 2
+            return (k, v), n_bytes
+
+        # Pool queries down to KV-head granularity (GQA): mean over each group
+        q_pool = q.reshape(B, T, H, group, D).mean(dim=3)       # [B, T, H, D]
+
+        # Score in bf16 to save memory: O(B·H·T²) attention matrix.
+        scale = D ** -0.5
+        # qk[b,h,i,j] = q_pool[b,i,h,:] · k[b,j,h,:] / √d
+        qk = torch.einsum("bihd,bjhd->bhij", q_pool, k) * scale
+        causal = torch.ones(T, T, dtype=torch.bool, device=k.device).tril()
+        qk = qk.masked_fill(~causal[None, None], float("-inf"))
+        attn = torch.softmax(qk.float(), dim=-1)                # [B, H, T, T]
+        # Heavy-hitter score per (B, H, j) = Σ_i attn[i, j], pooled across heads
+        score = attn.sum(dim=2).sum(dim=1)                       # [B, T]
+        # Force-keep the recent window (will always survive top-k)
+        score[:, cutoff:] = float("inf")
+        _, top_idx = torch.topk(score, keep_total, dim=1)        # [B, keep_total]
+        mask = torch.zeros(B, T, dtype=torch.bool, device=k.device)
+        mask.scatter_(1, top_idx, True)
+        keep_mask = mask[:, :, None, None]
+        k_keep = k * keep_mask
+        v_keep = v * keep_mask
+
+        # Bytes: kept tokens × (K+V bf16) + position-index bits per heavy-hitter
+        idx_bits = max(1, (cutoff - 1).bit_length())
+        idx_bytes = (B * keep_old * idx_bits + 7) // 8
+        n_bytes = (B * keep_total * H * D * 2) * 2 + idx_bytes
+        return (k_keep, v_keep), n_bytes
+
+    def decompress(self, state):
+        return state
+
+
 class HeadPruneCompressor(KVCompressor):
     """Drop the last `n_drop` KV heads entirely (zero their K,V).
     Compute heads still GQA-replicate the surviving KV-head; pruned heads'
@@ -692,6 +766,7 @@ def pick_compressor(name, config):
       sliding_W{W}                 e.g. sliding_W128
       sink{S}_W{W}                 e.g. sink4_W128
       topk_knorm_{P}pct            e.g. topk_knorm_50pct
+      h2o_R{recent}_K{P}pct        e.g. h2o_R64_K50pct
       svd_r{R}                     e.g. svd_r16
       randproj_r{R}                e.g. randproj_r32
       headprune_{K}                e.g. headprune_1
@@ -730,6 +805,12 @@ def pick_compressor(name, config):
     if name.startswith("topk_knorm_"):
         pct_str = name[len("topk_knorm_"):].rstrip("pct")
         return TopKByKNormCompressor(config, k_frac=int(pct_str) / 100.0)
+    if name.startswith("h2o_R"):
+        # h2o_R{recent}_K{P}pct
+        rest = name[len("h2o_R"):]
+        recent_str, _, k_part = rest.partition("_K")
+        pct_str = k_part.rstrip("pct")
+        return H2OCompressor(config, recent=int(recent_str), keep_frac=int(pct_str) / 100.0)
     if name.startswith("svd_r"):
         return SVDLowRankCompressor(config, rank=int(name[len("svd_r"):]))
     if name.startswith("randproj_r"):
@@ -769,7 +850,10 @@ def _attention_forward_with_compression(self, x, ve, cos_sin, window_size):
 
     # *** COMPRESSION HOOK ***
     if _ACTIVE_COMPRESSOR is not None:
-        state, n_bytes = _ACTIVE_COMPRESSOR.compress(k, v)
+        if getattr(_ACTIVE_COMPRESSOR, "needs_q", False):
+            state, n_bytes = _ACTIVE_COMPRESSOR.compress(k, v, q=q)
+        else:
+            state, n_bytes = _ACTIVE_COMPRESSOR.compress(k, v)
         k, v = _ACTIVE_COMPRESSOR.decompress(state)
         _TOTAL_COMPRESSED_BYTES += n_bytes
         _TOTAL_TOKENS_SEEN += B * T
