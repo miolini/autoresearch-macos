@@ -12,4 +12,4 @@ e588bfb	5.942022	6.1563	0.021429	1.922298	keep	hybrid recent=64 bf16 + old INT2 
 90aea70	-0.014182	16.0000	1.601418	2.694578	discard	sliding_window_128 [medium bpt=96.00 α20=-16.028 α50=-64.071] — pure eviction is brutal
 90aea70	1.958972	1.9592	0.000021	1.093180	keep	int8_sym_per_tok_per_head [medium bpt=784.00 α20=1.958761 α50=1.958128]
 90aea70	3.804338	3.8400	0.003566	1.096725	keep	int4_sym_per_tok_per_head [medium bpt=400.00 α20=3.768676 α50=3.661690]
-PENDING	15.547822	32.0000	1.645218	2.738377	discard	sliding_window_64 [medium bpt=48.00 α20=-0.904 α50=-50.261] — α10 wins on ratio alone but quality cliff
+ba2844f	15.547822	32.0000	1.645218	2.738377	discard	sliding_window_64 [medium bpt=48.00 α20=-0.904 α50=-50.261] — α10 wins on ratio alone but quality cliff

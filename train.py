@@ -1449,13 +1449,21 @@ total_tokens = max(step, 1) * TOTAL_BATCH_SIZE
 model.eval()
 
 # 1) Baseline compression eval: identity compressor (uncompressed K,V).
-#    This reports the true cache-bytes-per-token-per-layer of an FP/BF16 cache
-#    AND serves as the val_bpb reference for delta computation.
-#    (We skip the redundant vanilla evaluate_bpb to keep wall time tight.)
-identity_compressor = KVCompressor(config)
-with autocast_ctx:
-    baseline_bpb, baseline_bpt = evaluate_with_compressor(
-        model, tokenizer, DEVICE_BATCH_SIZE, identity_compressor)
+#    Cached once per substrate (depends only on model state) to save ~15s/run.
+_baseline_cache_path = os.path.join(_CACHE_DIR, f"baseline_{_cfg_key}.pt")
+if TRAIN_CACHE and cached_loaded and os.path.exists(_baseline_cache_path):
+    _b = torch.load(_baseline_cache_path, weights_only=True)
+    baseline_bpb = float(_b["bpb"])
+    baseline_bpt = float(_b["bpt"])
+    print(f"Loaded cached baseline: bpb={baseline_bpb:.6f} bpt={baseline_bpt:.2f}")
+else:
+    identity_compressor = KVCompressor(config)
+    with autocast_ctx:
+        baseline_bpb, baseline_bpt = evaluate_with_compressor(
+            model, tokenizer, DEVICE_BATCH_SIZE, identity_compressor)
+    if TRAIN_CACHE:
+        torch.save({"bpb": baseline_bpb, "bpt": baseline_bpt}, _baseline_cache_path)
+        print(f"Saved baseline cache: bpb={baseline_bpb:.6f} bpt={baseline_bpt:.2f}")
 val_bpb = baseline_bpb  # alias for backward-compat printing
 
 # 3) Agent's compression eval. Selected via env var COMPRESSOR (see pick_compressor).
