@@ -219,15 +219,77 @@ from the leaderboard re-run (see `figures/substrate_sweep.png`):
 
 ### 3.4 Family-resolved comparison
 
-Figure `figures/family_comparison.png` colours each compressor by
-family (quantization / low-rank / eviction / hybrid) and shows that the
-Pareto front is *covered by different families in different regimes* —
-i.e. the deployment recommendation depends on the operating point.
+Figure `figures/family_pareto.png` colours each compressor on the
+medium substrate by family (quantization / quant-group / quant-mixed /
+eviction / sink+window / top-k / low-rank / head-prune / hybrid /
+stack). Two visual takeaways:
 
-### 3.5 Score trajectory
+1. **The quantization family hugs the lower-left of the Pareto plane**
+   (low Δ, moderate ratio). All other families sit at higher Δ or
+   lower ratio.
+2. **Hybrid stacks (quant × eviction) inherit their eviction parent's
+   Δ.** They appear at high ratio + high Δ — visually clustered with
+   their eviction parents, not with their quant inner.
 
-Figure `figures/score_trajectory.png` shows the running best at α = 10
-across the experiment sequence, demonstrating monotonic improvement.
+This picture is the strongest evidence in our study that the
+inference-time deployment Pareto front, *for a substrate trained with
+full attention*, is dominated by quantization. Eviction and low-rank
+methods would need substrate-side adaptation (training-time mask, or
+projected K, V layers) to compete.
+
+### 3.5 α-sensitivity and the deployment leader table
+
+A central practical question is: *how does the deployment recommendation
+change as the quality penalty weight α varies?* We present two views.
+
+**Restricted view (Δ < 0.10 gate).** When we restrict attention to
+compressors whose quality loss is bounded (Δval_bpb < 0.10 — a roughly
+"production-acceptable" tolerance), the leader is the same compressor
+under every α we considered, on every substrate we tested:
+
+| Substrate | α=10 leader | α=20 leader | α=50 leader |
+|---|---|---|---|
+| small (D=3, H=2, HD=96) | int4 (3.76) | int4 (3.69) | int4 (3.46) |
+| medium (D=6, H=4, HD=96) | int4 (3.80) | int4 (3.77) | int4 (3.66) |
+| large (D=10, H=9, HD=96) | int4 (3.82) | int4 (3.80) | int4 (3.75) |
+| HD=64 (D=6, H=6) | int4 (3.73) | int4 (3.70) | int4 (3.59) |
+| HD=128 (D=6, H=3) | int4 (3.84) | int4 (3.80) | int4 (3.69) |
+
+**Pure per-(token, head) symmetric INT4 quantization is the universal
+restricted-Pareto leader** in our study. This robustness (5 substrates ×
+3 α values, all the same answer) is the strongest conclusion we draw.
+
+**Unrestricted view (no quality gate).** Without a quality gate, the
+leader is sensitive to both α and substrate:
+
+| Substrate | α=10 leader | α=20 leader | α=50 leader |
+|---|---|---|---|
+| small  | int4 | int4 | int4 |
+| medium | svd_r8 (Δ=1.63) | svd_r8 (Δ=1.63) | int4 |
+| large  | int2 (Δ=0.23) | int4 | int4 |
+| HD=64  | int2 (Δ=0.32) | int4 | int4 |
+| HD=128 | int4 | int4 | int4 |
+
+This view exposes two phenomena:
+
+1. **The α=10 score is gameable by extreme-ratio + extreme-loss
+   compressors.** SVD r=8 at the medium substrate scores 31.7 at α=10
+   despite Δval_bpb = 1.63 (the cache reconstruction is essentially
+   useless). Even α=20 does not always rescue the right ordering.
+   Practitioners reading a paper that presents a single α score must
+   verify the quality column independently.
+2. **At higher substrate scale, INT2 catches up at α=10.** On the large
+   substrate, INT2 has Δval_bpb = 0.23 — small enough that the 7.4×
+   ratio offsets the penalty at α=10. This is consistent with the
+   "INT2 viable at production scale" reading of recent KV-cache
+   quantization papers.
+
+We therefore report `S(α=10)` only with the Δ<0.10 gate applied; the
+unrestricted column in `results.tsv` is preserved for reproducibility
+but is not the basis for any deployment recommendation. The full
+trajectory of `S(α=10)` across all 60 + experiments is plotted in
+`figures/score_trajectory.png`; the running-best line approaches the
+INT4 ratio (≈ 3.84) on every substrate we tested.
 
 ## 4. Discussion
 
