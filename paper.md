@@ -346,9 +346,10 @@ leader is sensitive to both α and substrate:
 |---|---|---|---|
 | small  | int4 | int4 | int4 |
 | medium | svd_r8 (Δ=1.63) | svd_r8 (Δ=1.63) | int4 |
-| large  | int2 (Δ=0.23) | int4 | int4 |
+| large  | int2 (Δ=0.23) | mixed_K4_V2 | mixed_K4_V2 |
 | HD=64  | int2 (Δ=0.32) | int4 | int4 |
 | HD=128 | int4 | int4 | int4 |
+| hd128_large | mixed_K4_V2 | mixed_K4_V2 | int4 |
 
 This view exposes two phenomena:
 
@@ -367,9 +368,10 @@ This view exposes two phenomena:
 We therefore report `S(α=10)` only with the Δ<0.10 gate applied; the
 unrestricted column in `results.tsv` is preserved for reproducibility
 but is not the basis for any deployment recommendation. The full
-trajectory of `S(α=10)` across all 60 + experiments is plotted in
+trajectory of `S(α=10)` across all 100 + experiments is plotted in
 `figures/score_trajectory.png`; the running-best line approaches the
-INT4 ratio (≈ 3.84) on every substrate we tested.
+INT4 ratio (≈ 3.84) on the four small/medium-scale substrates and the
+mixed_K4_V2 ratio (≈ 5.05) on the two large-depth substrates.
 
 ## 4. Discussion
 
