@@ -243,16 +243,14 @@ from the leaderboard re-run (see `figures/substrate_sweep.png`):
    crossover above: 2-bit V quantization is catastrophic at small
    (Δ = 0.224) but merely a 5 % quality cost at large.
 3. **Group-wise quantization overhead exceeds its quality benefit at
-   every substrate scale tested.** `int4_group16` and `int4_group8`
-   both lose to vanilla INT4 by ratio drop > quality gain, at all of
-   small / medium / large. The orthogonal HEAD_DIM ∈ {64, 96, 128}
-   sweep (§4.1) extends this finding to wider heads: vanilla INT4
-   dominates group-wise INT4 at every (head_dim, group_size) combination
-   we tested. The "group wins at large head_dim" hypothesis from the
-   quantization literature is therefore not supported in this study;
-   the only regime that remains untested is the *interaction* of large
-   head_dim with large depth (e.g. HEAD_DIM = 128 at DEPTH = 10), which
-   we list as a follow-up in §5.
+   every (substrate, head_dim, depth) combination tested.**
+   `int4_group{8, 16, 32}` lose to vanilla INT4 across small / medium /
+   large, across the HD ∈ {64, 96, 128} sweep at fixed depth=6, and
+   across the new HEAD_DIM=128 × DEPTH=10 *interaction* substrate
+   (§4.1). The "group wins at large head_dim × large depth" hypothesis
+   from the quantization literature is therefore *not supported* at any
+   (head_dim, group_size, depth) combination we tested in our 24 GB
+   budget; the BF16 scale cost dominates the modest quality gain.
 
 ### 3.4 Family-resolved comparison
 
@@ -291,17 +289,22 @@ for one substrate where mixed-precision K4 / V2 takes the crown:
 | **large (D=10, H=9, HD=96)** | **mixed_K4_V2 (4.56)** | **mixed_K4_V2 (4.07)** | **mixed_K4_V2 (2.60)** |
 | HD=64 (D=6, H=6) | int4 (3.73) | int4 (3.70) | int4 (3.59) |
 | HD=128 (D=6, H=3) | int4 (3.84) | int4 (3.80) | int4 (3.69) |
+| **hd128_large (D=10, HD=128)** | **mixed_K4_V2 (4.65)** | **mixed_K4_V2 (4.18)** | **mixed_K4_V2 (2.77)** |
 
-**Per-(token, head) symmetric INT4 is the restricted-Pareto leader on 4 of
-5 substrates**, but on the largest substrate `mixed_K4_V2` (4-bit K,
-2-bit V, ratio 5.05×, Δ=0.049) takes over at every α. The pattern is
+**Per-(token, head) symmetric INT4 is the restricted-Pareto leader on
+the four small/medium scale substrates**, but on *both* large-depth
+substrates we tested (large at HD=96 and hd128_large at HD=128) the
+mixed-precision K4 / V2 split takes over at every α. The pattern is
 internally consistent with Finding 2 (aggressive quantization tolerates
 larger substrates better) and Finding 10 (V is the cheaper place to
-sacrifice bits). The deployment recommendation therefore depends on
-substrate scale: INT4 for ≤ 26 M-parameter models in our sweep, and
-the K4 / V2 split for ≥ 139 M-parameter models. Whether the crossover
-generalizes to multi-billion-parameter production models is open and is
-the most actionable follow-up from this paper.
+sacrifice bits). The K4_V2 win is *depth-driven*, not head-dim-driven:
+adding head_dim from 96 → 128 at fixed DEPTH=10 leaves the K4_V2 lead
+intact and even slightly widens it (S(20) 4.07 → 4.18). The deployment
+recommendation therefore depends on substrate scale: INT4 for ≤ 26 M-
+parameter models in our sweep, and the K4 / V2 split for ≥ 139 M-
+parameter models. Whether the crossover generalizes to multi-billion-
+parameter production models is open and is the most actionable
+follow-up from this paper.
 
 **Unrestricted view (no quality gate).** Without a quality gate, the
 leader is sensitive to both α and substrate:
@@ -359,12 +362,29 @@ scale storage is a smaller fraction of data storage), we retrain
 medium-depth substrates at `HEAD_DIM ∈ {64, 96, 128}`. INT4_g32 at
 `HD = 64` (D/G = 2) is the closest group-wise variant to ever match
 vanilla INT4: ratio 3.56× vs 3.76×, Δ improves by 0.0009 — still a
-20 % storage cost for a 0.1 ‰ quality bump. Vanilla per-(token, head)
-INT4 dominates group-wise at every `(head_dim, group_size)` we
-tested. The "group wins at larger head_dim" hypothesis from the
-quantization literature is **not supported** at our scales — the
-overhead from one BF16 scale per group plus the `D/G` ratio of scales
-to elements is too large at INT4 to amortize away.
+20 % storage cost for a 0.1 ‰ quality bump.
+
+**`head_dim` × `depth` interaction sweep (closing the §5 limitation).**
+A second hypothesis is that group-wise might win in the *combined*
+large-head_dim × large-depth regime, where the per-group scale becomes
+proportionally smaller across many layers. We retrained an
+`hd128_large` substrate (DEPTH=10 ASPECT_RATIO=80 HEAD_DIM=128,
+≈ 110 M parameters in the same 24 GB budget) and re-ran INT4 alongside
+INT4_g{8, 16, 32}:
+
+| Compressor | bpt | ratio | Δbpb | S(α=20) |
+|---|---|---|---|---|
+| int4 (vanilla) | 924 | 3.88× | 0.0018 | **3.84** |
+| int4_g32 | 1008 | 3.56× | 0.0011 | 3.53 |
+| int4_g16 | 1120 | 3.20× | 0.0008 | 3.18 |
+| int4_g8 | 1344 | 2.67× | 0.0006 | 2.65 |
+
+Vanilla INT4 still wins by a wide margin; group-wise overhead grows
+linearly with `D/G`, while the quality benefit is sub-linear and tops
+out at < 1 ‰ Δbpb improvement. The "group wins at larger head_dim ×
+depth" hypothesis from the quantization literature is therefore **not
+supported** at any of the (head_dim, group_size, depth) combinations
+we tested — at our scales, the BF16 scale cost dominates the gain.
 
 ### 4.2 Recency bias and the hybrid frontier — scale dependence
 
@@ -416,10 +436,38 @@ attention is a measurably better selection rule than the K-norm proxy:
 | 50 % | 0.37 | 0.32 | −5.4 | −4.4 |
 | 75 % | 0.14 | 0.10 | −1.5 | −0.7 |
 
-The H2O α20 score never crosses zero on this substrate; even the gentlest
-configuration (R=64, K=75 %, ratio 1.32×) sits at the boundary of
-production-acceptable quality, while INT4 at ratio 3.84× is essentially
-lossless. The H2O improvement over top-k‖K‖ is real but narrow.
+Pushing H2O retention higher (K ∈ {80, 85, 90 %}) shows that the method
+*does* cross both the Δ < 0.10 quality gate and into positive α20 score,
+but only at very low compression ratios:
+
+| recent / keep_frac | ratio | Δbpb | S(α=20) | S(α=50) |
+|---|---|---|---|---|
+| R=64, K=80 % | 1.24 | 0.070 | −0.16 | −2.25 |
+| R=64, K=85 % | 1.17 | 0.043 | **+0.31** | −0.98 |
+| R=64, K=90 % | 1.11 | 0.021 | **+0.68** | **+0.04** |
+
+So heavy-hitter eviction can be deployed in a "lossy-but-functional"
+regime (Δbpb < 0.05 at ~ 1.1× saving), but it cannot deliver the 3–5×
+compression ratios that quantization achieves at lower Δbpb. INT4 at
+3.84× / Δ ≈ 0.0035 still strictly Pareto-dominates every H2O point on
+this substrate. The H2O improvement over top-k‖K‖ is real and consistent
+across retention levels, but narrow in absolute terms.
+
+**H2O quality improves with substrate scale.** Re-running R=64 on small
+and large substrates produces the same scale-tolerance pattern we
+observed for INT2 (Finding 2):
+
+| keep_frac | small Δ | medium Δ | large Δ |
+|---|---|---|---|
+| K=25 % | 0.82 | 0.67 | 0.59 |
+| K=50 % | 0.42 | 0.32 | 0.28 |
+| K=75 % | 0.15 | 0.10 | **0.093** |
+
+At K=75 % on the large substrate, H2O for the first time clears the
+Δ < 0.10 quality gate at non-trivial retention (1.32× compression). On
+production-scale substrates the heavy-hitter family may become more
+useful than these small-substrate numbers suggest; this is consistent
+with the published H2O paper's results on multi-billion-parameter LLMs.
 
 This is a **substrate-property** observation, not a method-of-eviction
 indictment: we trained with full attention (`window_pattern = 'L'`),
@@ -498,12 +546,11 @@ projected K, V layers — out of scope here).
   to make eviction-friendly methods Pareto-competitive. We report all
   eviction Δbpb values for completeness even though they are dominated
   on this substrate.
-- **`head_dim` sweep is at fixed depth.** The HEAD_DIM ∈ {64, 96, 128}
-  sweep in §4.1 holds depth=6 and ASPECT_RATIO=64 fixed; HEAD_DIM is
-  varied independently. The combined "large depth × large head_dim"
-  regime (e.g. HEAD_DIM = 128 at DEPTH = 10) is not in our sweep, so
-  the *interaction* between depth and head_dim on group-wise overhead
-  is a remaining open question.
+- **`head_dim` × `depth` interaction sweep is one substrate wide.** The
+  hd128_large interaction substrate in §4.1 covers (HEAD_DIM=128,
+  DEPTH=10) at the same ≈ 24 GB budget as the rest of the study, but a
+  finer grid (e.g. HD ∈ {96, 128, 160} × DEPTH ∈ {10, 14}) is left to
+  follow-up work.
 
 ## 6. Conclusion
 

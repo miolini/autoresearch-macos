@@ -30,6 +30,7 @@ FAMILY_COLORS = {
     "evict":      "#d62728",
     "evict_sink": "#ff9896",
     "evict_topk": "#ff7f0e",
+    "evict_h2o":  "#bcbd22",
     "lowrank":    "#9467bd",
     "headprune":  "#8c564b",
     "hybrid":     "#2ca02c",
@@ -60,6 +61,8 @@ def family_of(name):
         return "evict_sink"
     if n.startswith("topk_"):
         return "evict_topk"
+    if n.startswith("h2o_"):
+        return "evict_h2o"
     if n.startswith("svd_") or n.startswith("randproj"):
         return "lowrank"
     if n.startswith("headprune"):
@@ -68,10 +71,11 @@ def family_of(name):
 
 
 def parse_row_substrate(desc):
-    """Extract substrate tag (small/medium/large/hd64/hd128) from description, or 'small_legacy' for old rows."""
-    m = re.search(r"\[(small|medium|large|hd64|hd128)", desc)
-    if m:
-        return m.group(1)
+    """Extract substrate tag from description, or 'small_legacy' for old rows.
+    Tries the longest tags first so 'hd128_large' wins over 'hd128'."""
+    for tag in ("hd128_large", "hd64_large", "small", "medium", "large", "hd64", "hd128"):
+        if re.search(r"\[" + re.escape(tag) + r"(?:\s|\b|\])", desc):
+            return tag
     return "small_legacy"
 
 
@@ -262,7 +266,7 @@ def plot_head_dim_sweep(rows, out_path):
 def plot_score_trajectory(rows, out_path):
     """One panel per substrate so the running-best line doesn't jump
     when the substrate changes."""
-    SUBS_ORDER = ["small", "medium", "large", "hd64", "hd128", "small_legacy"]
+    SUBS_ORDER = ["small", "medium", "large", "hd64", "hd128", "hd128_large", "small_legacy"]
     by_sub = {}
     for r in rows:
         by_sub.setdefault(r["substrate"], []).append(r)
