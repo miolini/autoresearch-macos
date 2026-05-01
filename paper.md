@@ -179,11 +179,36 @@ budgets.
 
 ### 3.3 Substrate-scale sweep
 
-We rerun the leaderboard at three model sizes within the same hardware
-budget (small ≈ 7 M params, medium ≈ 50 M, large ≈ 200 M). We test the
-hypothesis that **group-wise quantization overhead** decreases as
-head_dim grows: at small head_dim the per-group scale storage is a
-larger fraction of data storage, so finer groups lose ratio faster.
+We rerun the core compressors at three substrate sizes inside the same
+24 GB hardware budget:
+
+| Substrate | DEPTH | n_kv_head | head_dim | n_embd | params |
+|---|---|---|---|---|---|
+| small  | 3  | 2 | 96 | 192 | ≈ 7 M |
+| medium | 6  | 4 | 96 | 384 | ≈ 26 M |
+| large  | 10 | 9 | 96 | 864 | ≈ 139 M |
+
+Each substrate is trained on a fixed wall-clock budget (300 s on a
+4090) and then frozen across all compressors. Three findings emerge
+from the leaderboard re-run (see `figures/substrate_sweep.png`):
+
+1. **INT4 sym per-(token, head) is the consistent leader at α ∈ {20, 50}**
+   across small, medium, and large. `S(20)` ranges 3.69 → 3.77 → 3.80
+   monotonically with substrate scale.
+2. **Aggressive quantization tolerates larger substrates better.**
+   INT2 Δbpb improves with substrate scale: 0.59 (small) → 0.45
+   (medium) → 0.23 (large). At large, INT2 has positive `S(20)` for
+   the first time (2.85), suggesting that production-scale models may
+   make INT2 viable where 7 M-parameter substrates cannot.
+3. **Group-wise quantization overhead exceeds its quality benefit at
+   every substrate scale tested.** `int4_group16` and `int4_group8`
+   both lose to vanilla INT4 by ratio drop > quality gain, at all of
+   small / medium / large. We had hypothesized that larger head_dim
+   would let group-wise quant win; head_dim is fixed at 96 across the
+   sweep, so this hypothesis is *not yet falsified at scale* — only
+   the substrate-depth-and-width axis is. A separate `head_dim` sweep
+   is required to test the group-vs-overhead claim directly (left for
+   follow-up).
 
 ### 3.4 Family-resolved comparison
 
@@ -201,19 +226,67 @@ across the experiment sequence, demonstrating monotonic improvement.
 
 ### 4.1 Group-wise quantization at scale
 
-(populated by the substrate-scale sweep)
+The hope behind group-wise quantization (one BF16 scale per
+`group_size` channels) is that finer groups reduce per-element
+quantization error enough to offset the per-group scale storage. On
+our substrate (head_dim = 96), at INT4:
 
-### 4.2 Recency bias and the hybrid frontier
+- `g=16` (D/G = 6): bpt = 1080 vs vanilla INT4 bpt = 900 (large
+  substrate). Δbpb improves by 0.0008 — a **0.1 ‰** quality
+  improvement at the cost of 20 % storage overhead. `S(20)` 3.18 vs 3.80.
+- `g=8` (D/G = 12): bpt = 1296 (44 % overhead) for Δbpb improvement
+  ≈ 0.001. Loses on every α.
 
-The hybrid `recent-bf16 + old-INT-N` family exploits the empirical
-recency bias of attention. At our T = 2048 sequence length, retaining
-only the last 64 tokens (3 % of the cache) at full precision suffices
-to cap Δbpb at 0.02 even when the older 97 % is INT2. We test how this
-generalizes at longer T and across substrate scales.
+Across small/medium/large, the same ordering holds: vanilla INT4
+strictly dominates `g=16` and `g=8` on `S(20)` and `S(50)`. The
+hypothesis that group-wise wins emerge at larger `head_dim` is
+neither confirmed nor refuted here; it requires a `head_dim` sweep
+(constant 96 across our substrate sweep).
 
-### 4.3 Eviction is not always quantization-orthogonal
+### 4.2 Recency bias and the hybrid frontier — scale dependence
 
-(populated as eviction methods are added)
+In an exploratory MPS-trained-and-then-CUDA-tested run on the small
+substrate, hybrid `recent_R=64 bf16 + old INT2` yielded Δbpb ≈ 0.02 at
+ratio ≈ 6.2× — visually impressive on a Pareto plot. **This finding
+does not generalize**. Re-running the same compressor with a
+freshly-trained substrate at small / medium / large yields:
+
+| Substrate | recent_R=64 INT2 Δbpb | recent_R=64 INT4 Δbpb |
+|---|---|---|
+| small  | 0.57 | (not run) |
+| medium | 0.44 | 0.0035 |
+| large  | (not run) | 0.0018 |
+
+In every case the hybrid `+ INT2 old` variant inherits the INT2 quality
+floor of its old-token component, while the hybrid `+ INT4 old` variant
+is strictly *dominated* by vanilla INT4 (same Δbpb at lower ratio,
+because the recent-bf16 portion adds bytes without quality benefit).
+**Pure recency-tier compression is therefore not a win on
+full-attention substrates at our scales.** The original "win" was an
+artifact of training-time stochasticity at the smallest scale.
+
+### 4.3 Eviction is not orthogonal to quantization on this substrate
+
+We tested three families of eviction:
+sliding window (W ∈ {64, 128, 256, 512}),
+StreamingLLM-style sink + window (S=4, W ∈ {64, 128, 256}),
+and top-k by ‖K‖₂ (k_frac ∈ {25 %, 50 %, 75 %}).
+All produced Δbpb in [0.14, 1.6] — far above the keep-gate of 0.10.
+
+Stacking eviction × INT4 (e.g. `stack:sliding_W256+int4`,
+`stack:sink4_W256+int4`) inherits the eviction parent's quality cliff,
+because the inner INT4 quantization operates on tokens *that have
+already been zeroed out*. The composite stack thus offers no advantage
+over the eviction parent alone, despite the higher headline
+compression ratio.
+
+This is a **substrate-property** observation, not a method-of-eviction
+indictment: we trained with full attention (`window_pattern = 'L'`),
+so every token contributes during training. Re-running the substrate
+sweep with sliding-window-pretraining, or with a substrate that uses
+sliding+sink masks throughout training (à la StreamingLLM), would be
+needed to make eviction methods competitive at inference time. We
+list this as an explicit limitation in §5.
 
 ### 4.4 Recommendations for resource-adaptive deployment
 
@@ -247,9 +320,25 @@ projected K, V layers — out of scope here).
   (attention-norm eviction, heavy-hitter selection) are evaluated faithfully.
 - **Composite score depends on α.** We report `r`, `Δbpb`, `S(10)`,
   `S(20)`, `S(50)` separately to support re-scoring.
-- **MPS nondeterminism** affects the third decimal of bpb on Apple Silicon.
-  The reference CUDA results in this paper are deterministic up to
-  PyTorch's standard CUDA nondeterminism (~ 5 × 10⁻⁴ on Δbpb).
+- **CUDA nondeterminism** (cuDNN reductions, atomic adds in SDPA's
+  fused kernels) introduces ~ 5 × 10⁻⁴ noise on Δbpb between
+  successive identical runs. All quality conclusions above this floor
+  are reproducible; conclusions at or below it (e.g. INT8's
+  ≈ 2 × 10⁻⁵ Δ) are reported with the caveat that the absolute number
+  may shift but the **ordering** is stable.
+- **Eviction methods are evaluated on a full-attention substrate.**
+  The substrate was trained with `window_pattern = 'L'` (full causal
+  attention at every layer); eviction at inference therefore destroys
+  information the model relies on. This is an honest pessimistic bias
+  for eviction methods. A separate experiment training the substrate
+  with sliding-window or sink+window masks throughout would be needed
+  to make eviction-friendly methods Pareto-competitive. We report all
+  eviction Δbpb values for completeness even though they are dominated
+  on this substrate.
+- **`head_dim` is fixed at 96** across the substrate sweep; only depth
+  and `n_kv_head` vary. The "group-wise quantization wins at large
+  head_dim" hypothesis therefore remains untested at-scale, and is
+  explicitly flagged in §4.1 as a follow-up.
 
 ## 6. Conclusion
 
