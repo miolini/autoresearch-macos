@@ -414,20 +414,33 @@ projected K, V layers — out of scope here).
   to make eviction-friendly methods Pareto-competitive. We report all
   eviction Δbpb values for completeness even though they are dominated
   on this substrate.
-- **`head_dim` is fixed at 96** across the substrate sweep; only depth
-  and `n_kv_head` vary. The "group-wise quantization wins at large
-  head_dim" hypothesis therefore remains untested at-scale, and is
-  explicitly flagged in §4.1 as a follow-up.
+- **`head_dim` sweep is at fixed depth.** The HEAD_DIM ∈ {64, 96, 128}
+  sweep in §4.1 holds depth=6 and ASPECT_RATIO=64 fixed; HEAD_DIM is
+  varied independently. The combined "large depth × large head_dim"
+  regime (e.g. HEAD_DIM = 128 at DEPTH = 10) is not in our sweep, so
+  the *interaction* between depth and head_dim on group-wise overhead
+  is a remaining open question.
 
 ## 6. Conclusion
 
 Holding the model and eval constant and demanding honest byte accounting,
 we obtain a clean Pareto front of KV-cache compressors that directly
-answers the deployment question for resource-adaptive inference. Different
-families dominate different regions of the front — quantization at low
-compression, hybrids at moderate compression, eviction-based methods at
-extreme compression. We provide a single table mapping (memory budget,
-quality tolerance) → recommended compressor.
+answers the deployment question for resource-adaptive inference. Our
+strongest finding is the **substrate-invariance of pure per-(token, head)
+symmetric INT4 quantization as the Pareto leader** under any
+production-acceptable quality gate (Δbpb < 0.10): across five substrates
+× three α values, the same compressor wins. Group-wise quantization,
+asymmetric quantization, mixed K/V precision, low-rank approximation,
+and every eviction variant we tested (sliding window, StreamingLLM
+sink+window, top-k by ‖K‖₂, head pruning, hybrid stacks) are
+*dominated* on this full-attention substrate at our scales. Eviction
+and low-rank methods become Pareto-competitive only after the
+substrate is itself adapted at training time (sliding-window masking,
+projected K, V layers) — a follow-up direction we leave open. The map
+from (memory budget, quality tolerance) → recommended compressor in
+§4.4 is therefore very simple at deployment time and the strongest
+practical recommendation we can give for a system serving a
+full-attention pre-trained model.
 
 ## References
 
