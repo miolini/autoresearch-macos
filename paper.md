@@ -174,8 +174,29 @@ distinguishable from sampling noise.
 
 ### 3.1 Compressors evaluated
 
-(populated as the loop runs — see `results.tsv`. Families:
-quantization, low-rank, eviction, hybrid.)
+We populate the leaderboard with 30 + compressor configurations across
+the four canonical families. The full enumeration:
+
+| Family | Configurations | Description |
+|---|---|---|
+| **Identity** | identity (BF16) | Reference baseline; `bpt = 4 H D` |
+| **Quantization (uniform sym)** | INT8, INT4, INT2 | Per-(token, head) symmetric, BF16 scale per slice |
+| **Quantization (group-wise)** | INT4 + group_size ∈ {8, 16, 32, 64} | One BF16 scale per group along head_dim |
+| **Quantization (asymmetric)** | INT4_asym | Adds BF16 zero-point per slice |
+| **Quantization (mixed K/V precision)** | (k_bits, v_bits) ∈ {(8, 4), (4, 8), (8, 2), (4, 2)} | Different bit-width on K vs V |
+| **Hybrid (recency-tier)** | recent_R ∈ {64, 128} × old INT-N ∈ {2, 4} | Recent tokens BF16, older tokens INT-N |
+| **Eviction (sliding window)** | W ∈ {64, 128, 256, 512} | Keep last W tokens, drop the rest |
+| **Eviction (StreamingLLM)** | sinks=4, W ∈ {64, 128, 256} | Keep first 4 + last W tokens |
+| **Eviction (top-k by ‖K‖)** | k_frac ∈ {25 %, 50 %, 75 %} | Keep top-k tokens by row-wise K-norm |
+| **Head pruning** | drop ∈ {1, 2} of n_kv_head | Zero K, V on a fraction of KV heads |
+| **Low-rank (per-token)** | SVD rank ∈ {8, 16, 32}; random projection rank=32 | rank-r per-token approximation across heads |
+| **Hybrid stacks** | (sliding_W256, sink4_W256, headprune_1) × INT4 | Outer eviction composed with inner quantization |
+
+Every compressor is evaluated on the medium substrate; the **core
+seven** (INT8, INT4, INT2, INT4_g16, INT4_asym, hybrid_R64_INT4,
+mixed_K8_V4) are additionally evaluated on small/large substrates and
+on HEAD_DIM ∈ {64, 96, 128} variants of the medium substrate
+(§3.3, §4.1). All raw rows live in `results.tsv`, sorted by `S(α=20)`.
 
 ### 3.2 Pareto front on the reference substrate
 
@@ -210,12 +231,14 @@ from the leaderboard re-run (see `figures/substrate_sweep.png`):
 3. **Group-wise quantization overhead exceeds its quality benefit at
    every substrate scale tested.** `int4_group16` and `int4_group8`
    both lose to vanilla INT4 by ratio drop > quality gain, at all of
-   small / medium / large. We had hypothesized that larger head_dim
-   would let group-wise quant win; head_dim is fixed at 96 across the
-   sweep, so this hypothesis is *not yet falsified at scale* — only
-   the substrate-depth-and-width axis is. A separate `head_dim` sweep
-   is required to test the group-vs-overhead claim directly (left for
-   follow-up).
+   small / medium / large. The orthogonal HEAD_DIM ∈ {64, 96, 128}
+   sweep (§4.1) extends this finding to wider heads: vanilla INT4
+   dominates group-wise INT4 at every (head_dim, group_size) combination
+   we tested. The "group wins at large head_dim" hypothesis from the
+   quantization literature is therefore not supported in this study;
+   the only regime that remains untested is the *interaction* of large
+   head_dim with large depth (e.g. HEAD_DIM = 128 at DEPTH = 10), which
+   we list as a follow-up in §5.
 
 ### 3.4 Family-resolved comparison
 
