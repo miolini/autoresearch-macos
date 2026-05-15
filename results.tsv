@@ -1,1 +1,2 @@
 commit	val_bpb	memory_gb	status	description
+a91238a	0.000000	0.0	crash	baseline OOM on MPS with device batch size 16
