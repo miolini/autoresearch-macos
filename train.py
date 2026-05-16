@@ -485,7 +485,7 @@ HEAD_DIM = 128          # target head dimension for attention
 WINDOW_PATTERN = "L"    # sliding window pattern: L=full, S=half context
 
 # Optimization
-TOTAL_BATCH_SIZE = 2**16 # ~65K tokens per optimizer step
+TOTAL_BATCH_SIZE = 2**14 # ~16K tokens per optimizer step
 EMBEDDING_LR = 0.6      # learning rate for token embeddings (Adam)
 UNEMBEDDING_LR = 0.004  # learning rate for lm_head (Adam)
 MATRIX_LR = 0.04        # learning rate for matrix parameters (Muon)
@@ -498,7 +498,7 @@ FINAL_LR_FRAC = 0.0     # final LR as fraction of initial
 
 # Model size
 DEPTH = 4               # number of transformer layers
-DEVICE_BATCH_SIZE = 16  # per-device batch size (reduce if OOM)
+DEVICE_BATCH_SIZE = 8   # per-device batch size (reduce if OOM)
 
 # ---------------------------------------------------------------------------
 # Setup: tokenizer, model, optimizer, dataloader
@@ -604,6 +604,7 @@ t_start_training = time.time()
 smooth_train_loss = 0
 total_training_time = 0
 step = 0
+STARTUP_EXCLUDED_STEPS = 1 if device_type == "mps" else 10
 
 def sync_device(device_type):
     if device_type == "cuda":
@@ -646,7 +647,7 @@ while True:
     t1 = time.time()
     dt = t1 - t0
 
-    if step > 10:
+    if step >= STARTUP_EXCLUDED_STEPS:
         total_training_time += dt
 
     # Logging
@@ -671,7 +672,7 @@ while True:
     step += 1
 
     # Time's up — but only stop after warmup steps so we don't count compilation
-    if step > 10 and total_training_time >= TIME_BUDGET:
+    if step >= STARTUP_EXCLUDED_STEPS and total_training_time >= TIME_BUDGET:
         break
 
 print()  # newline after \r training log
@@ -686,7 +687,8 @@ with autocast_ctx:
 # Final summary
 t_end = time.time()
 startup_time = t_start_training - t_start
-steady_state_mfu = 100 * num_flops_per_token * TOTAL_BATCH_SIZE * (step - 10) / total_training_time / H100_BF16_PEAK_FLOPS if total_training_time > 0 else 0
+steady_state_steps = max(0, step - STARTUP_EXCLUDED_STEPS)
+steady_state_mfu = 100 * num_flops_per_token * TOTAL_BATCH_SIZE * steady_state_steps / total_training_time / H100_BF16_PEAK_FLOPS if total_training_time > 0 else 0
 if device_type == "cuda":
     peak_vram_mb = torch.cuda.max_memory_allocated() / 1024 / 1024
 else:
