@@ -49,8 +49,7 @@ def norm(x):
 
 
 def has_ve(layer_idx, n_layer):
-    """Returns True if layer should have Value Embedding (alternating, last always included)."""
-    return layer_idx % 2 == (n_layer - 1) % 2
+    return False
 
 
 def apply_rotary_emb(x, cos, sin):
@@ -302,15 +301,35 @@ class GPT(nn.Module):
             x = block(x, ve, cos_sin, self.window_sizes[i])
         x = norm(x)
 
+        if targets is not None:
+            softcap = 15
+            if reduction == 'none':
+                losses = []
+                for start in range(0, T, LOGIT_CHUNK_SIZE):
+                    end = min(start + LOGIT_CHUNK_SIZE, T)
+                    logits = self.lm_head(x[:, start:end]).float()
+                    logits = softcap * torch.tanh(logits / softcap)
+                    losses.append(F.cross_entropy(
+                        logits.reshape(-1, logits.size(-1)),
+                        targets[:, start:end].reshape(-1),
+                        ignore_index=-1,
+                        reduction='none',
+                    ))
+                return torch.cat(losses)
+
+            logits = self.lm_head(x)
+            logits = softcap * torch.tanh(logits / softcap)
+            return F.cross_entropy(
+                logits.reshape(-1, logits.size(-1)),
+                targets.reshape(-1),
+                ignore_index=-1,
+                reduction=reduction,
+            )
+
         softcap = 15
         logits = self.lm_head(x)
         logits = logits.float()
         logits = softcap * torch.tanh(logits / softcap)
-
-        if targets is not None:
-            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1),
-                                   ignore_index=-1, reduction=reduction)
-            return loss
         return logits
 
 # ---------------------------------------------------------------------------
@@ -481,11 +500,11 @@ class MuonAdamW(torch.optim.Optimizer):
 
 # Model architecture
 ASPECT_RATIO = 64       # model_dim = depth * ASPECT_RATIO
-HEAD_DIM = 128          # target head dimension for attention
+HEAD_DIM = 64           # target head dimension for attention
 WINDOW_PATTERN = "L"    # sliding window pattern: L=full, S=half context
 
 # Optimization
-TOTAL_BATCH_SIZE = 2**16 # ~65K tokens per optimizer step
+TOTAL_BATCH_SIZE = 2**15 # ~33K tokens per optimizer step
 EMBEDDING_LR = 0.6      # learning rate for token embeddings (Adam)
 UNEMBEDDING_LR = 0.004  # learning rate for lm_head (Adam)
 MATRIX_LR = 0.04        # learning rate for matrix parameters (Muon)
@@ -497,8 +516,10 @@ WARMDOWN_RATIO = 0.5    # fraction of time budget for LR warmdown
 FINAL_LR_FRAC = 0.0     # final LR as fraction of initial
 
 # Model size
-DEPTH = 4               # number of transformer layers
-DEVICE_BATCH_SIZE = 16  # per-device batch size (reduce if OOM)
+DEPTH = 2               # number of transformer layers
+DEVICE_BATCH_SIZE = 16  # per-device training batch size
+EVAL_BATCH_SIZE = 32    # eval batch size
+LOGIT_CHUNK_SIZE = 128  # time-axis chunk size for eval loss computation
 
 # ---------------------------------------------------------------------------
 # Setup: tokenizer, model, optimizer, dataloader
@@ -604,6 +625,7 @@ t_start_training = time.time()
 smooth_train_loss = 0
 total_training_time = 0
 step = 0
+STARTUP_EXCLUDED_STEPS = 1 if device_type == "mps" else 10
 
 def sync_device(device_type):
     if device_type == "cuda":
@@ -646,7 +668,7 @@ while True:
     t1 = time.time()
     dt = t1 - t0
 
-    if step > 10:
+    if step >= STARTUP_EXCLUDED_STEPS:
         total_training_time += dt
 
     # Logging
@@ -671,7 +693,7 @@ while True:
     step += 1
 
     # Time's up — but only stop after warmup steps so we don't count compilation
-    if step > 10 and total_training_time >= TIME_BUDGET:
+    if step >= STARTUP_EXCLUDED_STEPS and total_training_time >= TIME_BUDGET:
         break
 
 print()  # newline after \r training log
@@ -681,12 +703,13 @@ total_tokens = step * TOTAL_BATCH_SIZE
 # Final eval
 model.eval()
 with autocast_ctx:
-    val_bpb = evaluate_bpb(model, tokenizer, DEVICE_BATCH_SIZE)
+    val_bpb = evaluate_bpb(model, tokenizer, EVAL_BATCH_SIZE)
 
 # Final summary
 t_end = time.time()
 startup_time = t_start_training - t_start
-steady_state_mfu = 100 * num_flops_per_token * TOTAL_BATCH_SIZE * (step - 10) / total_training_time / H100_BF16_PEAK_FLOPS if total_training_time > 0 else 0
+steady_state_steps = max(0, step - STARTUP_EXCLUDED_STEPS)
+steady_state_mfu = 100 * num_flops_per_token * TOTAL_BATCH_SIZE * steady_state_steps / total_training_time / H100_BF16_PEAK_FLOPS if total_training_time > 0 else 0
 if device_type == "cuda":
     peak_vram_mb = torch.cuda.max_memory_allocated() / 1024 / 1024
 else:
