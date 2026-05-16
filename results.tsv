@@ -1,2 +1,8 @@
 commit	val_bpb	memory_gb	status	description
 a91238a	0.000000	0.0	crash	baseline OOM on MPS with device batch size 16
+3d4f22f	2.151667	0.0	discard	reduce device batch size to 8; exceeded 10 minute runtime limit on MPS
+6cab5fd	0.000000	0.0	discard	reduce total batch and MPS startup exclusion; training fit but evaluation exceeded 10 minute limit
+6923877	0.000000	0.0	discard	chunk logits and shrink to 2 layers; later steps still too slow for the 10 minute limit
+cd76f4f	2.265205	0.0	keep	remove value embeddings, use 2-layer 128-dim model, eval-only chunking, MPS startup exclusion
+df89b2c	0.000000	0.0	discard	increase depth to 3 on simplified model; step times jumped too much for the 10 minute limit
+1bbd8dc	2.159426	0.0	keep	increase Muon matrix learning rate from 0.04 to 0.06 on the simplified 2-layer MPS model
