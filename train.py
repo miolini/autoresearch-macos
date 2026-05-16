@@ -516,7 +516,7 @@ WARMDOWN_RATIO = 0.5    # fraction of time budget for LR warmdown
 FINAL_LR_FRAC = 0.0     # final LR as fraction of initial
 
 # Model size
-DEPTH = 2               # number of transformer layers
+DEPTH = 3               # number of transformer layers
 DEVICE_BATCH_SIZE = 16  # per-device training batch size
 EVAL_BATCH_SIZE = 32    # eval batch size
 LOGIT_CHUNK_SIZE = 128  # time-axis chunk size for eval loss computation
