@@ -689,6 +689,8 @@ startup_time = t_start_training - t_start
 steady_state_mfu = 100 * num_flops_per_token * TOTAL_BATCH_SIZE * (step - 10) / total_training_time / H100_BF16_PEAK_FLOPS if total_training_time > 0 else 0
 if device_type == "cuda":
     peak_vram_mb = torch.cuda.max_memory_allocated() / 1024 / 1024
+elif device_type == "mps":
+    peak_vram_mb = torch.mps.driver_allocated_memory() / 1024 / 1024
 else:
     peak_vram_mb = 0.0
 
