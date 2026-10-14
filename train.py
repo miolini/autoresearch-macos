@@ -303,9 +303,10 @@ class GPT(nn.Module):
         x = norm(x)
 
         softcap = 15
-        logits = self.lm_head(x)
-        logits = logits.float()
+        # bf16 matmul + softcap (fp32 here is ~40% slower on MPS); loss stays fp32
+        logits = F.linear(x.bfloat16(), self.lm_head.weight.bfloat16())
         logits = softcap * torch.tanh(logits / softcap)
+        logits = logits.float()
 
         if targets is not None:
             loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1),
