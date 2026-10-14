@@ -303,9 +303,10 @@ class GPT(nn.Module):
         x = norm(x)
 
         softcap = 15
-        logits = self.lm_head(x)
-        logits = logits.float()
+        # bf16 matmul + softcap (fp32 here is ~40% slower on MPS); loss stays fp32
+        logits = F.linear(x.bfloat16(), self.lm_head.weight.bfloat16())
         logits = softcap * torch.tanh(logits / softcap)
+        logits = logits.float()
 
         if targets is not None:
             loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1),
@@ -485,7 +486,7 @@ HEAD_DIM = 128          # target head dimension for attention
 WINDOW_PATTERN = "L"    # sliding window pattern: L=full, S=half context
 
 # Optimization
-TOTAL_BATCH_SIZE = 2**16 # ~65K tokens per optimizer step
+TOTAL_BATCH_SIZE = 2**13 # ~8K tokens per optimizer step
 EMBEDDING_LR = 0.6      # learning rate for token embeddings (Adam)
 UNEMBEDDING_LR = 0.004  # learning rate for lm_head (Adam)
 MATRIX_LR = 0.04        # learning rate for matrix parameters (Muon)
@@ -498,7 +499,7 @@ FINAL_LR_FRAC = 0.0     # final LR as fraction of initial
 
 # Model size
 DEPTH = 4               # number of transformer layers
-DEVICE_BATCH_SIZE = 16  # per-device batch size (reduce if OOM)
+DEVICE_BATCH_SIZE = 4   # per-device batch size (reduce if OOM)
 
 # ---------------------------------------------------------------------------
 # Setup: tokenizer, model, optimizer, dataloader
@@ -689,6 +690,8 @@ startup_time = t_start_training - t_start
 steady_state_mfu = 100 * num_flops_per_token * TOTAL_BATCH_SIZE * (step - 10) / total_training_time / H100_BF16_PEAK_FLOPS if total_training_time > 0 else 0
 if device_type == "cuda":
     peak_vram_mb = torch.cuda.max_memory_allocated() / 1024 / 1024
+elif device_type == "mps":
+    peak_vram_mb = torch.mps.driver_allocated_memory() / 1024 / 1024
 else:
     peak_vram_mb = 0.0
 
@@ -702,3 +705,8 @@ print(f"total_tokens_M:   {total_tokens / 1e6:.1f}")
 print(f"num_steps:        {step}")
 print(f"num_params_M:     {num_params / 1e6:.1f}")
 print(f"depth:            {DEPTH}")
+
+# Save the trained model so generate.py can sample from it
+ckpt_path = os.path.join(os.path.expanduser("~"), ".cache", "autoresearch", "model.pt")
+torch.save({"config": asdict(config), "state_dict": model.state_dict()}, ckpt_path)
+print(f"saved model to {ckpt_path}")
