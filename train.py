@@ -705,3 +705,8 @@ print(f"total_tokens_M:   {total_tokens / 1e6:.1f}")
 print(f"num_steps:        {step}")
 print(f"num_params_M:     {num_params / 1e6:.1f}")
 print(f"depth:            {DEPTH}")
+
+# Save the trained model so generate.py can sample from it
+ckpt_path = os.path.join(os.path.expanduser("~"), ".cache", "autoresearch", "model.pt")
+torch.save({"config": asdict(config), "state_dict": model.state_dict()}, ckpt_path)
+print(f"saved model to {ckpt_path}")
