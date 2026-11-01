@@ -24,7 +24,7 @@ By design, training runs for a **fixed 5-minute time budget** (wall clock, exclu
 
 ## Quick start
 
-**Requirements:** Apple Silicon Mac (M1/M2/M3/M4 with Metal/MPS support) or a single NVIDIA GPU, Python 3.10+, [uv](https://docs.astral.sh/uv/).
+**Requirements:** Apple Silicon Mac (M1/M2/M3/M4 with Metal/MPS support), Python 3.10+, [uv](https://docs.astral.sh/uv/).
 
 ```bash
 
@@ -43,7 +43,7 @@ uv run train.py
 
 If the above commands all work ok, your setup is working and you can go into autonomous research mode.
 
-**Platforms support**. This fork officially supports **macOS (Apple Silicon / MPS)** and CPU environments, while preserving the original NVIDIA GPU support. It removes the hardcoded dependency on FlashAttention-3, falling back to PyTorch's native Scaled Dot Product Attention (SDPA) with manual sliding window causal masking when needed. It also features MPS-specific optimizations (disabling unsupported `torch.compile` paths, lowering memory batch sizes for Metal bounds, and precisely casting optimizer states) allowing you to run autonomous research agents directly on your Mac!
+**Platforms support**. This fork supports **macOS (Apple Silicon / MPS)**. The upstream CUDA and CPU code paths are still present in the source, but `verify_macos_env()` refuses to run anywhere except macOS with a working MPS backend, so those paths are unreachable in this fork. It removes the hardcoded dependency on FlashAttention-3, falling back to PyTorch's native Scaled Dot Product Attention (SDPA) with manual sliding window causal masking when needed. It also features MPS-specific optimizations (disabling unsupported `torch.compile` paths, lowering memory batch sizes for Metal bounds, and precisely casting optimizer states) allowing you to run autonomous research agents directly on your Mac!
 
 ## Running the agent
 
@@ -70,11 +70,11 @@ pyproject.toml  — dependencies
 - **Fixed time budget.** Training always runs for exactly 5 minutes, regardless of your specific platform. This means you can expect approx 12 experiments/hour and approx 100 experiments while you sleep. There are two upsides of this design decision. First, this makes experiments directly comparable regardless of what the agent changes (model size, batch size, architecture, etc). Second, this means that autoresearch will find the most optimal model for your platform in that time budget. The downside is that your runs (and results) become not comparable to other people running on other compute platforms.
 - **Self-contained.** No external dependencies beyond PyTorch and a few small packages. No distributed training, no complex configs. One GPU, one file, one metric.
 
-## Platform support
+## Small-scale tips
 
-This code currently requires that you have a single NVIDIA GPU. In principle it is quite possible to support CPU, MPS and other platforms but this would also bloat the code. I'm not 100% sure that I want to take this on personally right now. People can reference (or have their agents reference) the full/parent nanochat repository that has wider platform support and shows the various solutions (e.g. a Flash Attention 3 kernels fallback implementation, generic device support, autodetection, etc.), feel free to create forks or discussions for other platforms and I'm happy to link to them here in the README in some new notable forks section or etc.
+If you'd like half-decent results at such a small scale, the [TinyStories dataset](https://huggingface.co/datasets/karpathy/tinystories-gpt4-clean) is much cleaner than what exists out there otherwise. It should be a drop-in replacement because it is encoded in exactly the same format. Any of your favorite coding agents should be able to do the swap.
 
-If you're going to be using autoresearch on Apple Macbooks in particular, I'd recommend one of the forks below. On top of this, if you'd like half-decent results at such a small scale, I'd recommend this [TinyStories dataset](https://huggingface.co/datasets/karpathy/tinystories-gpt4-clean) which is cleaner than what exists out there otherwise. It should be a drop in replacement because I have encoded it in exactly the same format. Any of your favorite coding agents should be able to do the swap :)
+Note that `MAX_SEQ_LEN` and `EVAL_TOKENS` live in `prepare.py` and are tuned for an NVIDIA GPU. On Apple Silicon the SDPA fallback uses a hand-built `T x T` mask, so attention is O(T^2) with no flash path — the upstream defaults (2048 / 21M eval tokens) do not finish a 5-minute run on an M4. Measurements are in the pull request that made these README fixes.
 
 ## Notable forks
 
